@@ -592,6 +592,32 @@ class JarvisLive:
                             self.speak(to_speak)
                         state["buf"] = sentences[-1]
 
+            # Create the stream — this was missing after the patch
+            try:
+                stream = api_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    tools=tools_oai,
+                    tool_choice="auto",
+                    max_tokens=400,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=True,
+                    **extra,
+                )
+            except Exception as e:
+                if use_groq and ("429" in str(e) or "rate" in str(e).lower()):
+                    print("[JARVIS] Groq rate limit — falling back to NVIDIA")
+                    api_client = client
+                    model      = fast_model
+                    stream = api_client.chat.completions.create(
+                        model=model, messages=messages, tools=tools_oai,
+                        tool_choice="auto", max_tokens=400,
+                        temperature=0.4, stream=True,
+                    )
+                else:
+                    raise
+
             try:
                 for chunk in stream:
                     if chunk.choices:
