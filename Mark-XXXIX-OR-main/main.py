@@ -965,15 +965,15 @@ class JarvisLive:
 
         # Boost mic volume to max in Windows so it picks up voice clearly
         try:
-            import subprocess as _sp
-            _sp.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "$dev=(New-Object -ComObject MMDeviceEnumerator).GetDefaultAudioEndpoint(1,1);"
-                 "$vol=$dev.Activate([Guid]'5CDF2C82-841E-4546-9722-0CF74078229A',1,$null);"
-                 "$vol.SetMasterVolumeLevelScalar(1.0,([Guid]'00000000-0000-0000-0000-000000000000'))"],
-                capture_output=True, timeout=5
-            )
-            print("[JARVIS] Mic volume boosted to 100%")
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            mic_dev = AudioUtilities.GetMicrophone()
+            if mic_dev:
+                iface = mic_dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                mic_vol = cast(iface, POINTER(IAudioEndpointVolume))
+                mic_vol.SetMasterVolumeLevelScalar(1.0, None)
+                print(f"[JARVIS] Mic volume boosted to 100%")
         except Exception:
             pass  # non-critical
 
