@@ -100,7 +100,9 @@ dev_agent     youtube_video      flight_finder
 ### 1. Clone or download the project
 
 ```bash
-git clone https://github.com/your-username/Mark-XXXIX
+git clone https://github.com/writtenscars2-art/Mark-XXXIX-OR-main--1-.git
+cd Mark-XXXIX-OR-main--1-
+
 cd Mark-XXXIX
 ```
 
