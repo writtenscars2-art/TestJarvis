@@ -963,6 +963,20 @@ class JarvisLive:
         print("[JARVIS] ElevenLabs Scribe STT started")
         self.ui.write_log("SYS: Microphone active (ElevenLabs Scribe) — speak to JARVIS.")
 
+        # Boost mic volume to max in Windows so it picks up voice clearly
+        try:
+            import subprocess as _sp
+            _sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "$dev=(New-Object -ComObject MMDeviceEnumerator).GetDefaultAudioEndpoint(1,1);"
+                 "$vol=$dev.Activate([Guid]'5CDF2C82-841E-4546-9722-0CF74078229A',1,$null);"
+                 "$vol.SetMasterVolumeLevelScalar(1.0,([Guid]'00000000-0000-0000-0000-000000000000'))"],
+                capture_output=True, timeout=5
+            )
+            print("[JARVIS] Mic volume boosted to 100%")
+        except Exception:
+            pass  # non-critical
+
         def _transcribe_loop():
             """
             Keep microphone stream open continuously.
@@ -991,8 +1005,8 @@ class JarvisLive:
                 # Open once, keep open for entire session
                 with mic as source:
                     rec.adjust_for_ambient_noise(source, duration=1.5)
-                    # Set threshold to 2x ambient — detects speech, rejects background noise
-                    rec.energy_threshold = max(300, rec.energy_threshold * 2)
+                    # Use calibrated threshold + small buffer — don't multiply by 2 for quiet mics
+                    rec.energy_threshold = max(50, rec.energy_threshold + 30)
                     print(f"[JARVIS] Mic calibrated — threshold: {rec.energy_threshold:.0f}")
 
                     while True:
@@ -1079,7 +1093,7 @@ class JarvisLive:
                 mic = sr.Microphone()
                 with mic as source:
                     rec.adjust_for_ambient_noise(source, duration=1.5)
-                    rec.energy_threshold = max(300, rec.energy_threshold * 2)
+                    rec.energy_threshold = max(50, rec.energy_threshold + 30)
                     print(f"[JARVIS] Google STT calibrated — threshold: {rec.energy_threshold:.0f}")
 
                     while True:
