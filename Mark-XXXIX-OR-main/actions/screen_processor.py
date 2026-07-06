@@ -10,8 +10,6 @@ import threading
 import cv2
 import mss
 import mss.tools
-import sounddevice as sd
-import numpy as np
 from pathlib import Path
 
 try:
@@ -183,11 +181,11 @@ class _LiveSession:
             print(f"[ScreenProcess] ⚠️ Error: {e}")
             self._ready.set()
 
-    def analyze(self, image_bytes: bytes, mime_type: str, user_text: str):
-        """Analyze image using NVIDIA NIM vision model."""
+    def analyze(self, image_bytes: bytes, mime_type: str, user_text: str) -> str:
+        """Analyze image using NVIDIA NIM vision model. Returns the analysis text."""
         if not self._client:
-            print("[ScreenProcess] ⚠️ Client not ready")
-            return
+            print("[ScreenProcess] Client not ready")
+            return "Vision system not ready, boss."
 
         try:
             b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -214,15 +212,18 @@ class _LiveSession:
             )
 
             result = (response.choices[0].message.content or "").strip()
-            if result and self._player:
-                self._player.write_log(f"Jarvis: {result}")
-                print(f"[ScreenProcess] 💬 {result}")
-            print("[ScreenProcess] ✅ Analysis complete")
+            if result:
+                if self._player:
+                    self._player.write_log(f"Jarvis: {result}")
+                print(f"[ScreenProcess] {result}")
+            print("[ScreenProcess] Analysis complete")
+            return result or "I could not analyze the image, boss."
 
         except Exception as e:
-            print(f"[ScreenProcess] ⚠️ Analysis error: {e}")
+            print(f"[ScreenProcess] Analysis error: {e}")
             if self._player:
                 self._player.write_log(f"Vision error: {e}")
+            return f"Vision analysis failed, boss: {e}"
 
     def is_ready(self) -> bool:
         return self._client is not None
@@ -274,9 +275,9 @@ def screen_process(
         print(f"[ScreenProcess] ❌ Capture error: {e}")
         return False
 
-    print(f"[ScreenProcess] 📦 {len(image_bytes)} bytes → sending")
-    _live.analyze(image_bytes, mime_type, user_text)
-    return True
+    print(f"[ScreenProcess] {len(image_bytes)} bytes → sending")
+    result = _live.analyze(image_bytes, mime_type, user_text)
+    return result
 
 
 def warmup_session(player=None):

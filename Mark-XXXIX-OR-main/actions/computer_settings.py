@@ -110,28 +110,20 @@ def brightness_up():
             'tell application "System Events" to key code 144'],
             capture_output=True)
     elif _OS == "Linux":
-        if subprocess.run(["which", "brightnessctl"],
-                capture_output=True).returncode == 0:
+        if subprocess.run(["which", "brightnessctl"], capture_output=True).returncode == 0:
             subprocess.run(["brightnessctl", "set", "+10%"], capture_output=True)
-        else:
-            subprocess.run(
-                'xrandr --output $(xrandr | grep " connected" | head -1 | cut -d " " -f1)'
-                ' --brightness $(python3 -c "import subprocess; '
-                'b=float(subprocess.check_output([\"xrandr\",\"--verbose\"]).decode()'
-                '.split(\"Brightness:\")[1].split()[0]); print(min(1.0,b+0.1))")',
-                shell=True, capture_output=True
-            )
     else:
         try:
+            import screen_brightness_control as sbc
+            cur = sbc.get_brightness(display=0)[0]
+            sbc.set_brightness(min(100, cur + 10), display=0)
+        except ImportError:
             subprocess.run(
                 ["powershell", "-Command",
                  "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
-                 ".WmiSetBrightness(1, [math]::Min(100, "
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness + 10))"],
-                capture_output=True, timeout=5
-            )
-        except Exception as e:
-            print(f"[Settings] Brightness up failed on Windows: {e}")
+                 ".WmiSetBrightness(1, [math]::Min(100,"
+                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness+10))"],
+                capture_output=True, timeout=5)
 
 def brightness_down():
     if _OS == "Darwin":
@@ -139,28 +131,75 @@ def brightness_down():
             'tell application "System Events" to key code 145'],
             capture_output=True)
     elif _OS == "Linux":
-        if subprocess.run(["which", "brightnessctl"],
-                capture_output=True).returncode == 0:
+        if subprocess.run(["which", "brightnessctl"], capture_output=True).returncode == 0:
             subprocess.run(["brightnessctl", "set", "10%-"], capture_output=True)
-        else:
-            subprocess.run(
-                'xrandr --output $(xrandr | grep " connected" | head -1 | cut -d " " -f1)'
-                ' --brightness $(python3 -c "import subprocess; '
-                'b=float(subprocess.check_output([\"xrandr\",\"--verbose\"]).decode()'
-                '.split(\"Brightness:\")[1].split()[0]); print(max(0.1,b-0.1))")',
-                shell=True, capture_output=True
-            )
     else:
         try:
+            import screen_brightness_control as sbc
+            cur = sbc.get_brightness(display=0)[0]
+            sbc.set_brightness(max(0, cur - 10), display=0)
+        except ImportError:
             subprocess.run(
                 ["powershell", "-Command",
                  "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
-                 ".WmiSetBrightness(1, [math]::Max(0, "
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness - 10))"],
-                capture_output=True, timeout=5
-            )
-        except Exception as e:
-            print(f"[Settings] Brightness down failed on Windows: {e}")
+                 ".WmiSetBrightness(1, [math]::Max(0,"
+                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness-10))"],
+                capture_output=True, timeout=5)
+
+def brightness_set(value: int):
+    """Set brightness to exact level 0-100."""
+    value = max(0, min(100, int(value)))
+    if _OS == "Darwin":
+        # Approximate via osascript brightness keys
+        brightness_up() if value > 50 else brightness_down()
+    elif _OS == "Linux":
+        if subprocess.run(["which", "brightnessctl"], capture_output=True).returncode == 0:
+            subprocess.run(["brightnessctl", "set", f"{value}%"], capture_output=True)
+    else:
+        try:
+            import screen_brightness_control as sbc
+            sbc.set_brightness(value, display=0)
+        except ImportError:
+            subprocess.run(
+                ["powershell", "-Command",
+                 f"(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods)"
+                 f".WmiSetBrightness(1,{value})"],
+                capture_output=True, timeout=5)
+
+def get_brightness() -> int:
+    """Get current brightness level 0-100."""
+    try:
+        import screen_brightness_control as sbc
+        return sbc.get_brightness(display=0)[0]
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(
+            ["powershell", "-Command",
+             "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness"],
+            capture_output=True, text=True, timeout=5)
+        return int(r.stdout.strip())
+    except Exception:
+        return -1
+
+def get_volume() -> int:
+    """Get current volume level 0-100."""
+    if _OS == "Windows":
+        try:
+            import math
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            devices   = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            vol       = cast(interface, POINTER(IAudioEndpointVolume))
+            db        = vol.GetMasterVolumeLevel()
+            if db <= -65.25:
+                return 0
+            return min(100, max(0, int(round(pow(10, db / 20) * 100))))
+        except Exception:
+            return -1
+    return -1
 
 def close_app():
     if _OS == "Darwin": pyautogui.hotkey("command", "q")
@@ -505,6 +544,7 @@ ACTION_MAP: dict[str, callable] = {
     "toggle_mute":         volume_mute,
     "brightness_up":       brightness_up,
     "brightness_down":     brightness_down,
+    "brightness_set":      lambda: None,   # handled specially in dispatcher
     "sleep_display":       sleep_display,
     "screen_off":          sleep_display,
     "pause_video":         pause_video,
@@ -624,6 +664,21 @@ def computer_settings(
             return f"Volume set to {value}%."
         except Exception as e:
             return f"Could not set volume: {e}"
+
+    if action == "brightness_set":
+        try:
+            brightness_set(int(value or 50))
+            return f"Brightness set to {value}%."
+        except Exception as e:
+            return f"Could not set brightness: {e}"
+
+    if action in ("get_volume", "volume_level", "current_volume"):
+        vol = get_volume()
+        return f"Volume is at {vol}%." if vol >= 0 else "Could not read volume level."
+
+    if action in ("get_brightness", "brightness_level", "current_brightness"):
+        br = get_brightness()
+        return f"Brightness is at {br}%." if br >= 0 else "Could not read brightness level."
 
     if action in ("type_text", "write_on_screen", "type", "write"):
         text = str(value or params.get("text", "")).strip()

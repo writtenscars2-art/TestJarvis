@@ -61,5 +61,17 @@
       "value": "hungry",
       "updated": "2026-07-06"
     }
+  },
+  "conversation": {
+    "delay": {
+      "value": "explained delay in response",
+      "updated": "2026-07-06"
+    }
+  },
+  "user_state": {
+    "user_mood": {
+      "value": "reassuring",
+      "updated": "2026-07-06"
+    }
   }
 }

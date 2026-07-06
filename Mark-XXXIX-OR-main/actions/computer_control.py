@@ -140,9 +140,16 @@ def _user_profile() -> dict:
     return {}
 
 def _type(text: str, interval: float = 0.03) -> str:
+    """Type text using clipboard for full Unicode support."""
     _require_pyautogui()
-    time.sleep(0.3)
-    pyautogui.typewrite(text, interval=interval)
+    time.sleep(0.2)
+    if _PYPERCLIP:
+        pyperclip.copy(str(text))
+        time.sleep(0.1)
+        pyautogui.hotkey("ctrl", "v")
+    else:
+        # ASCII-safe fallback only
+        pyautogui.typewrite(str(text), interval=interval)
     return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 

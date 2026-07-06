@@ -136,12 +136,12 @@ def _update_memory_async(user_text: str, jarvis_text: str) -> None:
 TOOL_DECLARATIONS = [
     {"name": "open_app",          "description": "Opens any app, program or website on Windows.", "parameters": {"type": "OBJECT", "properties": {"app_name": {"type": "STRING", "description": "App name e.g. Chrome, Spotify"}}, "required": ["app_name"]}},
     {"name": "web_search",        "description": "Searches the live web. Use for any current event, news, price, or fact.", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}, "mode": {"type": "STRING"}, "items": {"type": "ARRAY", "items": {"type": "STRING"}}, "aspect": {"type": "STRING"}}, "required": ["query"]}},
-    {"name": "weather_report",    "description": "Gets current weather for a city.", "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING"}}, "required": ["city"]}},
+    {"name": "weather_report",    "description": "Gets real-time weather for any city — current conditions, temperature, humidity, wind, and optional 3-day forecast.", "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING"}, "forecast": {"type": "boolean", "description": "true to include 3-day forecast"}, "units": {"type": "STRING", "description": "metric or imperial"}}, "required": ["city"]}},
     {"name": "send_message",      "description": "Sends a message via WhatsApp, Telegram, etc.", "parameters": {"type": "OBJECT", "properties": {"receiver": {"type": "STRING"}, "message_text": {"type": "STRING"}, "platform": {"type": "STRING"}}, "required": ["receiver", "message_text", "platform"]}},
     {"name": "reminder",          "description": "Sets a Windows Task Scheduler reminder.", "parameters": {"type": "OBJECT", "properties": {"date": {"type": "STRING"}, "time": {"type": "STRING"}, "message": {"type": "STRING"}}, "required": ["date", "time", "message"]}},
     {"name": "youtube_video",     "description": "Plays, summarizes, or shows trending YouTube videos.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "query": {"type": "STRING"}, "save": {"type": "BOOLEAN"}, "region": {"type": "STRING"}, "url": {"type": "STRING"}}, "required": []}},
-    {"name": "screen_process",    "description": "Captures screen or webcam and analyzes with AI vision. Call when user asks what's on screen or look at camera. Stay silent after — vision module speaks directly.", "parameters": {"type": "OBJECT", "properties": {"angle": {"type": "STRING"}, "text": {"type": "STRING"}}, "required": ["text"]}},
-    {"name": "computer_settings", "description": "Controls PC: volume, brightness, WiFi, screenshots, window management, dark mode, shutdown, scroll, zoom.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "description": {"type": "STRING"}, "value": {"type": "STRING"}}, "required": []}},
+    {"name": "screen_process",    "description": "Captures screen or webcam and analyzes with AI vision. Returns a spoken description. Call when user asks what's on screen, describes what they see, or wants camera analysis.", "parameters": {"type": "OBJECT", "properties": {"angle": {"type": "STRING", "description": "'screen' for display, 'camera' for webcam. Default: screen"}, "text": {"type": "STRING", "description": "Question or instruction about the image"}}, "required": ["text"]}},
+    {"name": "computer_settings", "description": "Controls PC: volume (up/down/mute/set/get), brightness (up/down/set/get), WiFi toggle, screenshots, window management (close/minimize/maximize/snap/fullscreen), dark mode, shutdown/restart, scroll, zoom, lock screen, file explorer, task manager.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "volume_up|volume_down|mute|volume_set|get_volume|brightness_up|brightness_down|brightness_set|get_brightness|screenshot|lock_screen|shutdown|restart|dark_mode|toggle_wifi|fullscreen|minimize|maximize|snap_left|snap_right|close_app|task_manager|file_explorer|open_settings|scroll_up|scroll_down|zoom_in|zoom_out|new_tab|close_tab|refresh_page|go_back|go_forward|copy|paste|undo|redo|select_all|save"}, "description": {"type": "STRING"}, "value": {"type": "STRING", "description": "For volume_set/brightness_set: 0-100. For type_text: text to type. For press_key: key name."}}, "required": []}},
     {"name": "browser_control",   "description": "Controls browser: open URLs, search, click, scroll, fill forms, get page text.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "url": {"type": "STRING"}, "query": {"type": "STRING"}, "selector": {"type": "STRING"}, "text": {"type": "STRING"}, "description": {"type": "STRING"}, "direction": {"type": "STRING"}, "key": {"type": "STRING"}, "incognito": {"type": "BOOLEAN"}}, "required": ["action"]}},
     {"name": "file_controller",   "description": "Manages files/folders: list, read, write, create, delete, move, copy, rename, find, disk usage.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "path": {"type": "STRING"}, "destination": {"type": "STRING"}, "new_name": {"type": "STRING"}, "content": {"type": "STRING"}, "name": {"type": "STRING"}, "extension": {"type": "STRING"}, "count": {"type": "INTEGER"}}, "required": ["action"]}},
     {"name": "desktop_control",   "description": "Controls desktop: wallpaper, organize, clean, list, stats.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING"}, "path": {"type": "STRING"}, "url": {"type": "STRING"}, "mode": {"type": "STRING"}, "task": {"type": "STRING"}}, "required": ["action"]}},
@@ -348,13 +348,14 @@ class JarvisLive:
                 result = r or "Done."
 
             elif tool_name == "screen_process":
-                threading.Thread(
-                    target=screen_process,
-                    kwargs={"parameters": args, "response": None,
-                            "player": self.ui, "session_memory": None},
-                    daemon=True
-                ).start()
-                result = "Vision module activated. Stay completely silent — vision module will speak directly."
+                r = await loop.run_in_executor(
+                    None,
+                    lambda: screen_process(
+                        parameters=args, response=None,
+                        player=self.ui, session_memory=None,
+                    )
+                )
+                result = r if isinstance(r, str) and r else "Vision analysis complete."
 
             elif tool_name == "computer_settings":
                 r = await loop.run_in_executor(None, lambda: computer_settings(parameters=args, response=None, player=self.ui))

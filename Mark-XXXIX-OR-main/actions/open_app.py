@@ -81,18 +81,59 @@ def _is_running(app_name: str) -> bool:
 
 
 def _launch_windows(app_name: str) -> bool:
+    """
+    Launch on Windows: tries subprocess paths first (fast, reliable),
+    falls back to Start menu search only when binary not found.
+    """
+    import subprocess as _sp
+
+    # 1. Try direct binary in PATH
+    binary = shutil.which(app_name) or shutil.which(app_name.lower())
+    if binary:
+        try:
+            _sp.Popen([binary], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+            time.sleep(1.0)
+            return True
+        except Exception:
+            pass
+
+    # 2. Try with shell=True (handles ms-settings:, shell URIs, etc.)
+    try:
+        _sp.Popen(app_name, shell=True, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        time.sleep(1.5)
+        return True
+    except Exception:
+        pass
+
+    # 3. Try pygetwindow — focus if already running
+    try:
+        import pygetwindow as gw
+        wins = gw.getWindowsWithTitle(app_name)
+        if wins:
+            wins[0].activate()
+            return True
+    except Exception:
+        pass
+
+    # 4. Last resort: Start menu keyboard search
     try:
         import pyautogui
         pyautogui.PAUSE = 0.1
         pyautogui.press("win")
-        time.sleep(0.6)
-        pyautogui.write(app_name, interval=0.05)
         time.sleep(0.8)
+        # Use clipboard paste instead of typewrite for reliable Unicode
+        try:
+            import pyperclip
+            pyperclip.copy(app_name)
+            pyautogui.hotkey("ctrl", "v")
+        except Exception:
+            pyautogui.write(app_name, interval=0.06)
+        time.sleep(1.0)
         pyautogui.press("enter")
         time.sleep(3.0)
         return True
     except Exception as e:
-        print(f"[open_app] ⚠️ Windows launch failed: {e}")
+        print(f"[open_app] Start menu fallback failed: {e}")
         return False
 
 def _launch_macos(app_name: str) -> bool:
