@@ -1,9 +1,13 @@
 {
     "nvidia_api_key": "nvapi-YOUR_KEY_HERE",
-    "nvidia_model": "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia_model": "meta/llama-3.3-70b-instruct",
+    "nvidia_model_deep": "nvidia/nemotron-3-super-120b-a12b",
+    "groq_api_key": "gsk_YOUR_GROQ_KEY_HERE",
+    "groq_model": "llama-3.1-8b-instant",
     "claude_api_key": "sk-ant-YOUR_KEY_HERE",
     "elevenlabs_api_key": "sk_YOUR_KEY_HERE",
     "elevenlabs_voice_id": "YOUR_VOICE_ID_HERE",
+    "default_browser": "msedge",
     "os_system": "windows",
     "camera_index": 0
 }
