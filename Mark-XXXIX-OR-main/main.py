@@ -430,21 +430,64 @@ class JarvisLive:
 
     async def _receive_audio(self):
         """
-        Main conversation loop — NVIDIA NIM with streaming.
-        Speaks sentence-by-sentence as tokens arrive for minimal latency.
+        Main conversation loop.
+        - Uses meta/llama-3.3-70b-instruct by default (fast, ~1-2s TTFT)
+        - Switches to Nemotron+thinking only when boss explicitly requests deep analysis
+        - Boss can cancel deep analysis mode at any time
+        - System prompt cached and refreshed every 30 turns (not rebuilt every call)
         """
         import re as _re
-
-        print("[JARVIS] Listening for commands...")
+        import json as _json
+        from datetime import datetime as _dt
 
         client = _make_client()
         loop   = asyncio.get_event_loop()
 
-        # Conversation starts empty — startup briefing is a spoken event, not chat history
-        conversation = []
-        full_out_log = []
+        conversation      = []
+        full_out_log      = []
+        deep_mode         = False   # True = use Nemotron+thinking for this turn
+        _deep_persistent  = False   # True = stay in deep mode until cancelled
+        _sys_cache        = None    # cached (system_str, turn_count)
+        _sys_refresh      = 30      # rebuild system prompt every N turns
+        _turn_count       = 0
 
-        # Build OpenAI tool list once — reused for every turn
+        # Keywords that trigger deep analysis mode
+        _DEEP_ON = {
+            "deep analysis", "analyze deeply", "think carefully", "think step by step",
+            "detailed reasoning", "analyze this thoroughly", "use deep thinking",
+            "enable deep analysis", "turn on deep analysis", "deep mode on",
+        }
+        # Keywords that cancel deep analysis
+        _DEEP_OFF = {
+            "cancel deep analysis", "stop deep analysis", "disable deep analysis",
+            "turn off deep analysis", "deep mode off", "normal mode", "fast mode",
+            "stop thinking deeply", "cancel deep mode",
+        }
+
+        def _build_sys() -> str:
+            """Build clean system prompt — called at startup and every _sys_refresh turns."""
+            mem_str     = format_memory_for_prompt(load_memory())
+            base_prompt = _load_system_prompt()
+            now         = _dt.now()
+            time_ctx    = (
+                f"[CURRENT DATE & TIME]\n"
+                f"Right now it is: {now.strftime('%A, %B %d, %Y — %I:%M %p')}\n\n"
+            )
+            # Strip startup briefing block — only runs at launch, not in conversation
+            clean = _re.sub(
+                r"STARTUP BRIEFING.*?(?=REAL-TIME DATA|RULES:|$)",
+                "", base_prompt, flags=_re.DOTALL
+            ).strip()
+            parts = [time_ctx]
+            if mem_str:
+                parts.append(mem_str)
+            parts.append(clean)
+            return "\n".join(parts)
+
+        # Build system prompt once at startup
+        _sys_cache = _build_sys()
+
+        # Build OpenAI-format tool list once — never changes at runtime
         tools_oai = []
         for td in TOOL_DECLARATIONS:
             props       = td.get("parameters", {}).get("properties", {})
@@ -467,123 +510,80 @@ class JarvisLive:
                 },
             })
 
-        def _stream_and_speak(messages: list, force_deep: bool = False) -> tuple[str, list]:
-            """
-            Call NVIDIA NIM with streaming.
-            Uses fast llama-3.3-70b by default (~1-2s TTFT).
-            Switches to Nemotron+thinking only when force_deep=True.
-            Reasoning tokens are internal — skipped, never spoken.
-            Returns (full_text, tool_calls_list).
-            """
-            buf        = ""
-            full_text  = ""
-            tool_calls_raw: dict = {}
-
-            # Model selection: fast by default, deep only on demand
-            cfg_data   = json.load(open(API_CONFIG_PATH, encoding="utf-8"))
+        def _call_api(messages: list, use_deep: bool) -> tuple[str, list]:
+            """Single NVIDIA NIM streaming call. Returns (reply_text, tool_calls)."""
+            cfg_data   = _json.load(open(API_CONFIG_PATH, encoding="utf-8"))
             fast_model = cfg_data.get("nvidia_model",      "meta/llama-3.3-70b-instruct")
             deep_model = cfg_data.get("nvidia_model_deep", fast_model)
-            model_name = deep_model if force_deep else fast_model
+            model      = deep_model if use_deep else fast_model
 
-            # Build clean runtime system prompt (strips startup briefing block)
-            memory      = load_memory()
-            mem_str     = format_memory_for_prompt(memory)
-            base_prompt = _load_system_prompt()
-            from datetime import datetime as _dt
-            import re as _re2
-            now        = _dt.now()
-            time_ctx   = (
-                f"[CURRENT DATE & TIME]\nRight now it is: "
-                f"{now.strftime('%A, %B %d, %Y — %I:%M %p')}\n\n"
-            )
-            clean_prompt = _re2.sub(
-                r"STARTUP BRIEFING.*?(?=REAL-TIME DATA|RULES:|$)",
-                "", base_prompt, flags=_re2.DOTALL
-            ).strip()
-            parts = [time_ctx]
-            if mem_str:
-                parts.append(mem_str)
-            parts.append(clean_prompt)
-            current_sys = "\n".join(parts)
-
-            updated_messages = [{"role": "system", "content": current_sys}] + [
-                m for m in messages if m.get("role") != "system"
-            ]
-
-            # Thinking params only for deep/Nemotron model
-            is_nemotron = "nemotron" in model_name.lower() or "thinking" in model_name.lower()
+            is_nemotron = "nemotron" in model.lower()
             extra = {}
             if is_nemotron:
                 extra = {
                     "extra_body": {
                         "chat_template_kwargs": {"enable_thinking": True},
-                        "reasoning_budget": 4096,   # capped — 16384 is too slow for most tasks
+                        "reasoning_budget": 4096,
                     }
                 }
 
-            try:
-                stream = client.chat.completions.create(
-                    model=model_name,
-                    messages=updated_messages,
-                    tools=tools_oai,
-                    tool_choice="auto",
-                    max_tokens=512,
-                    temperature=1.0 if is_nemotron else 0.4,
-                    top_p=0.95 if is_nemotron else 1.0,
-                    stream=True,
-                    **extra,
-                )
+            buf       = ""
+            full_text = ""
+            tc_raw: dict = {}
 
-                for chunk in stream:
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools_oai,
+                tool_choice="auto",
+                max_tokens=400,
+                temperature=1.0 if is_nemotron else 0.4,
+                top_p=0.95    if is_nemotron else 1.0,
+                stream=True,
+                **extra,
+            )
 
-                    # Skip internal reasoning tokens — never speak them
-                    if getattr(delta, "reasoning_content", None):
-                        continue
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-                    # Accumulate tool call fragments
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tool_calls_raw:
-                                tool_calls_raw[idx] = {"id": "", "name": "", "arguments": ""}
-                            if tc.function:
-                                if tc.function.name:
-                                    tool_calls_raw[idx]["name"] += tc.function.name
-                                if tc.function.arguments:
-                                    tool_calls_raw[idx]["arguments"] += tc.function.arguments
-                            if tc.id and not tool_calls_raw[idx]["id"]:
-                                tool_calls_raw[idx]["id"] = tc.id
+                # Skip internal Nemotron reasoning — never spoken
+                if getattr(delta, "reasoning_content", None):
+                    continue
 
-                    # Speak sentence-by-sentence as tokens arrive
-                    if delta.content:
-                        buf       += delta.content
-                        full_text += delta.content
-                        sentences  = _re.split(r"(?<=[.!?])\s+", buf)
-                        if len(sentences) > 1:
-                            to_speak = " ".join(sentences[:-1]).strip()
-                            if to_speak:
-                                self.speak(to_speak)
-                            buf = sentences[-1]
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tc_raw:
+                            tc_raw[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc.function:
+                            if tc.function.name:
+                                tc_raw[idx]["name"] += tc.function.name
+                            if tc.function.arguments:
+                                tc_raw[idx]["arguments"] += tc.function.arguments
+                        if tc.id and not tc_raw[idx]["id"]:
+                            tc_raw[idx]["id"] = tc.id
 
-            except Exception as e:
-                print(f"[JARVIS] Stream error: {e}")
-                raise
+                if delta.content:
+                    buf       += delta.content
+                    full_text += delta.content
+                    sentences  = _re.split(r"(?<=[.!?])\s+", buf)
+                    if len(sentences) > 1:
+                        to_speak = " ".join(sentences[:-1]).strip()
+                        if to_speak:
+                            self.speak(to_speak)
+                        buf = sentences[-1]
 
             if buf.strip():
                 self.speak(buf.strip())
 
-            tool_calls_list = [
-                tool_calls_raw[i] for i in sorted(tool_calls_raw)
-                if tool_calls_raw[i]["name"]
-            ]
-            return full_text.strip(), tool_calls_list
+            tc_list = [tc_raw[i] for i in sorted(tc_raw) if tc_raw[i]["name"]]
+            return full_text.strip(), tc_list
 
         try:
             while True:
-                await asyncio.sleep(0.02)   # tighter poll = faster input pickup
+                await asyncio.sleep(0.02)
 
                 if not self.ui.text_input_ready:
                     continue
@@ -593,35 +593,54 @@ class JarvisLive:
                     continue
 
                 user_text = user_text.strip()
+                ut_lower  = user_text.lower()
                 print(f"[JARVIS] User: {user_text}")
                 self.ui.write_log(f"You: {user_text}")
-                self.ui.set_state("THINKING")
 
+                # ── Deep analysis mode control ─────────────────────────────
+                if any(kw in ut_lower for kw in _DEEP_OFF):
+                    _deep_persistent = False
+                    self.speak("Deep analysis mode disabled, boss. Back to fast mode.")
+                    self.ui.write_log("Jarvis: Deep analysis mode OFF")
+                    continue
+
+                if any(kw in ut_lower for kw in _DEEP_ON):
+                    _deep_persistent = True
+                    self.speak("Deep analysis mode enabled, boss. I will think carefully.")
+                    self.ui.write_log("Jarvis: Deep analysis mode ON")
+                    # Don't continue — also process the message if there's more to it
+                    if len(user_text.split()) <= 5:
+                        # Pure mode-switch command, nothing else to process
+                        continue
+
+                use_deep = _deep_persistent
+                # ──────────────────────────────────────────────────────────
+
+                self.ui.set_state("THINKING")
                 conversation.append({"role": "user", "content": user_text})
+
+                # Refresh system prompt cache periodically
+                _turn_count += 1
+                if _turn_count % _sys_refresh == 0:
+                    _sys_cache = _build_sys()
 
                 try:
                     while True:
-                        messages_snap = list(conversation)  # system prompt built inside _stream_and_speak
-
-                        # Stream response
-                        # Detect if user wants deep analysis (Nemotron thinking model)
-                        _deep_kw = ("analyze deeply", "deep analysis", "think carefully",
-                                    "analyze this thoroughly", "detailed reasoning", "think step by step")
-                        _use_deep = any(kw in user_text.lower() for kw in _deep_kw)
+                        messages_snap = [
+                            {"role": "system", "content": _sys_cache}
+                        ] + list(conversation)
 
                         final_text, tool_calls = await loop.run_in_executor(
                             None,
-                            lambda: _stream_and_speak(messages_snap, force_deep=_use_deep)
+                            lambda: _call_api(messages_snap, use_deep)
                         )
 
                         if not tool_calls:
-                            # Pure text reply — done
                             if final_text:
                                 full_out_log.append(final_text)
                                 conversation.append({"role": "assistant", "content": final_text})
                             break
 
-                        # Tool call(s) — execute them
                         if final_text:
                             full_out_log.append(final_text)
 
@@ -629,10 +648,7 @@ class JarvisLive:
                             {
                                 "id":       tc["id"] or f"call_{i}",
                                 "type":     "function",
-                                "function": {
-                                    "name":      tc["name"],
-                                    "arguments": tc["arguments"],
-                                },
+                                "function": {"name": tc["name"], "arguments": tc["arguments"]},
                             }
                             for i, tc in enumerate(tool_calls)
                         ]
@@ -648,7 +664,9 @@ class JarvisLive:
                                 tool_input = json.loads(tc_obj["function"]["arguments"] or "{}")
                             except Exception:
                                 tool_input = {}
-                            tool_result = await self._execute_tool(tc_obj["function"]["name"], tool_input)
+                            tool_result = await self._execute_tool(
+                                tc_obj["function"]["name"], tool_input
+                            )
                             conversation.append({
                                 "role":         "tool",
                                 "tool_call_id": tc_obj["id"],

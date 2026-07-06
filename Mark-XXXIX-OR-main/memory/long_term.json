@@ -55,5 +55,11 @@
       "value": "open world monitor",
       "updated": "2026-07-05"
     }
+  },
+  "user_info": {
+    "current_status": {
+      "value": "hungry",
+      "updated": "2026-07-06"
+    }
   }
 }
