@@ -81,20 +81,18 @@ def volume_set(value: int):
     value = max(0, min(100, int(value)))
     if _OS == "Windows":
         try:
-            import math
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            vol_db    = -65.25 if value == 0 else max(-65.25, 20 * math.log10(value / 100))
-            vol.SetMasterVolumeLevel(vol_db, None)
-            return
+            from pycaw.pycaw import AudioUtilities
+            speakers = AudioUtilities.GetSpeakers()
+            vol = speakers.EndpointVolume
+            if vol is not None:
+                vol.SetMasterVolumeLevelScalar(value / 100.0, None)
+                return
         except Exception as e:
-            print(f"[Settings] pycaw failed, using keypress fallback: {e}")
-            pyautogui.press("volumemute")
-            pyautogui.press("volumemute")
+            print(f"[Settings] pycaw volume_set failed: {e}")
+            # Keypress fallback
+            if _PYAUTOGUI:
+                pyautogui.press("volumemute")
+                pyautogui.press("volumemute")
     elif _OS == "Darwin":
         subprocess.run(["osascript", "-e", f"set volume output volume {value}"],
             capture_output=True)
@@ -186,20 +184,48 @@ def get_volume() -> int:
     """Get current volume level 0-100."""
     if _OS == "Windows":
         try:
-            import math
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            db        = vol.GetMasterVolumeLevel()
-            if db <= -65.25:
-                return 0
-            return min(100, max(0, int(round(pow(10, db / 20) * 100))))
-        except Exception:
-            return -1
+            from pycaw.pycaw import AudioUtilities
+            speakers = AudioUtilities.GetSpeakers()
+            # pycaw >= 0.3: EndpointVolume is a direct property
+            vol = speakers.EndpointVolume
+            if vol is not None:
+                scalar = vol.GetMasterVolumeLevelScalar()
+                return int(round(scalar * 100))
+        except Exception as e:
+            print(f"[Settings] get_volume failed: {e}")
+        return -1
     return -1
+
+
+def get_device_info() -> str:
+    """Return a concise spoken device info summary."""
+    try:
+        import psutil, socket
+        cpu    = psutil.cpu_percent(interval=0.5)
+        mem    = psutil.virtual_memory()
+        disk   = psutil.disk_usage("C:\\") if _OS == "Windows" else psutil.disk_usage("/")
+        from datetime import datetime
+        uptime = datetime.now() - datetime.fromtimestamp(psutil.boot_time())
+        uptime_str = str(uptime).split(".")[0]
+
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            ip = "unknown"
+
+        import platform as _pl
+        proc = _pl.processor()[:40] or _pl.machine()
+
+        lines = [
+            f"OS: {_pl.system()} {_pl.release()}",
+            f"Processor: {proc}",
+            f"CPU: {cpu:.0f}%  RAM: {mem.used/1e9:.1f}/{mem.total/1e9:.1f} GB ({mem.percent:.0f}%)",
+            f"Disk: {disk.used/1e9:.0f}/{disk.total/1e9:.0f} GB ({disk.percent:.0f}%)",
+            f"Uptime: {uptime_str}  IP: {ip}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Could not retrieve device info: {e}"
 
 def close_app():
     if _OS == "Darwin": pyautogui.hotkey("command", "q")
@@ -679,6 +705,9 @@ def computer_settings(
     if action in ("get_brightness", "brightness_level", "current_brightness"):
         br = get_brightness()
         return f"Brightness is at {br}%." if br >= 0 else "Could not read brightness level."
+
+    if action in ("device_info", "get_device_info", "system_info", "pc_info", "computer_info"):
+        return get_device_info()
 
     if action in ("type_text", "write_on_screen", "type", "write"):
         text = str(value or params.get("text", "")).strip()
