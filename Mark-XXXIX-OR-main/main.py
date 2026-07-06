@@ -467,36 +467,38 @@ class JarvisLive:
                 },
             })
 
-        def _stream_and_speak(messages: list) -> tuple[str, list]:
+        def _stream_and_speak(messages: list, force_deep: bool = False) -> tuple[str, list]:
             """
             Call NVIDIA NIM with streaming.
-            Nemotron thinking: reasoning_content is internal — skipped, not spoken.
-            Content tokens are spoken sentence-by-sentence as they arrive.
+            Uses fast llama-3.3-70b by default (~1-2s TTFT).
+            Switches to Nemotron+thinking only when force_deep=True.
+            Reasoning tokens are internal — skipped, never spoken.
             Returns (full_text, tool_calls_list).
             """
             buf        = ""
             full_text  = ""
             tool_calls_raw: dict = {}
-            model_name = _get_nvidia_model()
 
-            # Build a clean runtime system prompt — excludes startup briefing instructions
-            # so JARVIS doesn't repeat the greeting/news on every conversation turn
-            memory     = load_memory()
-            mem_str    = format_memory_for_prompt(memory)
+            # Model selection: fast by default, deep only on demand
+            cfg_data   = json.load(open(API_CONFIG_PATH, encoding="utf-8"))
+            fast_model = cfg_data.get("nvidia_model",      "meta/llama-3.3-70b-instruct")
+            deep_model = cfg_data.get("nvidia_model_deep", fast_model)
+            model_name = deep_model if force_deep else fast_model
+
+            # Build clean runtime system prompt (strips startup briefing block)
+            memory      = load_memory()
+            mem_str     = format_memory_for_prompt(memory)
             base_prompt = _load_system_prompt()
-            from datetime import datetime
-            now = datetime.now()
-            time_ctx = (
+            from datetime import datetime as _dt
+            import re as _re2
+            now        = _dt.now()
+            time_ctx   = (
                 f"[CURRENT DATE & TIME]\nRight now it is: "
                 f"{now.strftime('%A, %B %d, %Y — %I:%M %p')}\n\n"
             )
-            # Strip the STARTUP BRIEFING block so it only fires once at launch
-            import re as _re2
             clean_prompt = _re2.sub(
                 r"STARTUP BRIEFING.*?(?=REAL-TIME DATA|RULES:|$)",
-                "",
-                base_prompt,
-                flags=_re2.DOTALL
+                "", base_prompt, flags=_re2.DOTALL
             ).strip()
             parts = [time_ctx]
             if mem_str:
@@ -508,14 +510,14 @@ class JarvisLive:
                 m for m in messages if m.get("role") != "system"
             ]
 
-            # Nemotron thinking params — matches NVIDIA's official snippet exactly
-            is_thinking = "nemotron" in model_name.lower() or "thinking" in model_name.lower()
+            # Thinking params only for deep/Nemotron model
+            is_nemotron = "nemotron" in model_name.lower() or "thinking" in model_name.lower()
             extra = {}
-            if is_thinking:
+            if is_nemotron:
                 extra = {
                     "extra_body": {
                         "chat_template_kwargs": {"enable_thinking": True},
-                        "reasoning_budget": 16384,
+                        "reasoning_budget": 4096,   # capped — 16384 is too slow for most tasks
                     }
                 }
 
@@ -525,9 +527,9 @@ class JarvisLive:
                     messages=updated_messages,
                     tools=tools_oai,
                     tool_choice="auto",
-                    max_tokens=1024,
-                    temperature=1 if is_thinking else 0.5,
-                    top_p=0.95 if is_thinking else 1.0,
+                    max_tokens=512,
+                    temperature=1.0 if is_nemotron else 0.4,
+                    top_p=0.95 if is_nemotron else 1.0,
                     stream=True,
                     **extra,
                 )
@@ -602,9 +604,14 @@ class JarvisLive:
                         messages_snap = list(conversation)  # system prompt built inside _stream_and_speak
 
                         # Stream response
+                        # Detect if user wants deep analysis (Nemotron thinking model)
+                        _deep_kw = ("analyze deeply", "deep analysis", "think carefully",
+                                    "analyze this thoroughly", "detailed reasoning", "think step by step")
+                        _use_deep = any(kw in user_text.lower() for kw in _deep_kw)
+
                         final_text, tool_calls = await loop.run_in_executor(
                             None,
-                            lambda: _stream_and_speak(messages_snap)
+                            lambda: _stream_and_speak(messages_snap, force_deep=_use_deep)
                         )
 
                         if not tool_calls:
