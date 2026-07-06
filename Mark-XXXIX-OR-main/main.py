@@ -511,44 +511,84 @@ class JarvisLive:
             })
 
         def _call_api(messages: list, use_deep: bool) -> tuple[str, list]:
-            """Single NVIDIA NIM streaming call. Returns (reply_text, tool_calls)."""
-            cfg_data   = _json.load(open(API_CONFIG_PATH, encoding="utf-8"))
-            fast_model = cfg_data.get("nvidia_model",      "meta/llama-3.3-70b-instruct")
-            deep_model = cfg_data.get("nvidia_model_deep", fast_model)
-            model      = deep_model if use_deep else fast_model
+            """
+            Primary: Groq (sub-1s latency, free, OpenAI-compatible).
+            Fallback: NVIDIA NIM (if Groq key missing or rate-limited).
+            Deep mode: NVIDIA Nemotron with thinking (only when use_deep=True).
+            """
+            cfg_data = _json.load(open(API_CONFIG_PATH, encoding="utf-8"))
 
-            is_nemotron = "nemotron" in model.lower()
-            extra = {}
-            if is_nemotron:
-                extra = {
-                    "extra_body": {
-                        "chat_template_kwargs": {"enable_thinking": True},
-                        "reasoning_budget": 4096,
+            groq_key   = cfg_data.get("groq_api_key",    "").strip()
+            groq_model = cfg_data.get("groq_model",       "llama-3.3-70b-versatile")
+            fast_model = cfg_data.get("nvidia_model",     "meta/llama-3.3-70b-instruct")
+            deep_model = cfg_data.get("nvidia_model_deep", fast_model)
+
+            # Decide which client + model to use
+            use_groq = (
+                groq_key
+                and groq_key != "YOUR_GROQ_KEY_HERE"
+                and not use_deep   # deep mode always uses NVIDIA Nemotron
+            )
+
+            if use_groq:
+                api_client = OpenAI(
+                    base_url="https://api.groq.com/openai/v1",
+                    api_key=groq_key,
+                )
+                model = groq_model
+                extra = {}
+                temperature = 0.4
+                top_p       = 1.0
+            else:
+                api_client  = client   # existing NVIDIA client
+                model       = deep_model if use_deep else fast_model
+                is_nemotron = "nemotron" in model.lower()
+                extra = {}
+                if is_nemotron:
+                    extra = {
+                        "extra_body": {
+                            "chat_template_kwargs": {"enable_thinking": True},
+                            "reasoning_budget": 4096,
+                        }
                     }
-                }
+                temperature = 1.0 if is_nemotron else 0.4
+                top_p       = 0.95 if is_nemotron else 1.0
 
             buf       = ""
             full_text = ""
             tc_raw: dict = {}
 
-            stream = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools_oai,
-                tool_choice="auto",
-                max_tokens=400,
-                temperature=1.0 if is_nemotron else 0.4,
-                top_p=0.95    if is_nemotron else 1.0,
-                stream=True,
-                **extra,
-            )
+            try:
+                stream = api_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    tools=tools_oai,
+                    tool_choice="auto",
+                    max_tokens=400,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=True,
+                    **extra,
+                )
+            except Exception as e:
+                # Groq rate-limit → fall back to NVIDIA immediately
+                if use_groq and ("429" in str(e) or "rate" in str(e).lower()):
+                    print("[JARVIS] Groq rate limit — falling back to NVIDIA")
+                    api_client = client
+                    model      = fast_model
+                    stream = api_client.chat.completions.create(
+                        model=model, messages=messages, tools=tools_oai,
+                        tool_choice="auto", max_tokens=400,
+                        temperature=0.4, stream=True,
+                    )
+                else:
+                    raise
 
             for chunk in stream:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
 
-                # Skip internal Nemotron reasoning — never spoken
                 if getattr(delta, "reasoning_content", None):
                     continue
 
