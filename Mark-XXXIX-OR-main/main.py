@@ -471,9 +471,9 @@ class JarvisLive:
 
         def _stream_and_speak(messages: list) -> tuple[str, list]:
             """
-            Call NVIDIA NIM with streaming + Nemotron extended thinking.
-            - reasoning_content tokens = internal thought (skipped, not spoken)
-            - content tokens = actual reply (spoken sentence-by-sentence)
+            Call NVIDIA NIM with streaming.
+            Nemotron thinking: reasoning_content is internal — skipped, not spoken.
+            Content tokens are spoken sentence-by-sentence as they arrive.
             Returns (full_text, tool_calls_list).
             """
             buf        = ""
@@ -481,25 +481,32 @@ class JarvisLive:
             tool_calls_raw: dict = {}
             model_name = _get_nvidia_model()
 
-            # Nemotron thinking params — only apply to thinking-capable models
-            is_thinking_model = "nemotron" in model_name.lower() or "thinking" in model_name.lower()
+            # Rebuild system prompt each turn so memory changes are always reflected
+            current_sys = self._build_config()["system"]
+            updated_messages = [{"role": "system", "content": current_sys}] + [
+                m for m in messages if m.get("role") != "system"
+            ]
+
+            # Nemotron thinking params — matches NVIDIA's official snippet exactly
+            is_thinking = "nemotron" in model_name.lower() or "thinking" in model_name.lower()
             extra = {}
-            if is_thinking_model:
+            if is_thinking:
                 extra = {
                     "extra_body": {
                         "chat_template_kwargs": {"enable_thinking": True},
-                        "reasoning_budget": 2048,   # cap thinking tokens for speed
+                        "reasoning_budget": 16384,
                     }
                 }
 
             try:
                 stream = client.chat.completions.create(
                     model=model_name,
-                    messages=messages,
+                    messages=updated_messages,
                     tools=tools_oai,
                     tool_choice="auto",
-                    max_tokens=512,
-                    temperature=0.6,
+                    max_tokens=1024,
+                    temperature=1 if is_thinking else 0.5,
+                    top_p=0.95 if is_thinking else 1.0,
                     stream=True,
                     **extra,
                 )
@@ -509,10 +516,9 @@ class JarvisLive:
                         continue
                     delta = chunk.choices[0].delta
 
-                    # Skip reasoning/thinking tokens entirely — internal only
-                    reasoning = getattr(delta, "reasoning_content", None)
-                    if reasoning:
-                        continue  # don't speak or accumulate thinking
+                    # Skip internal reasoning tokens — never speak them
+                    if getattr(delta, "reasoning_content", None):
+                        continue
 
                     # Accumulate tool call fragments
                     if delta.tool_calls:
@@ -528,12 +534,11 @@ class JarvisLive:
                             if tc.id and not tool_calls_raw[idx]["id"]:
                                 tool_calls_raw[idx]["id"] = tc.id
 
-                    # Accumulate reply text and speak sentence-by-sentence
+                    # Speak sentence-by-sentence as tokens arrive
                     if delta.content:
                         buf       += delta.content
                         full_text += delta.content
-
-                        sentences = _re.split(r"(?<=[.!?])\s+", buf)
+                        sentences  = _re.split(r"(?<=[.!?])\s+", buf)
                         if len(sentences) > 1:
                             to_speak = " ".join(sentences[:-1]).strip()
                             if to_speak:
@@ -832,62 +837,84 @@ class JarvisLive:
 
         el_client = _EL(api_key=el_key)
         rec       = sr.Recognizer()
-        rec.energy_threshold         = 300
-        rec.dynamic_energy_threshold = True
-        rec.pause_threshold          = 0.7
+        rec.energy_threshold         = 1200   # high threshold — ignores background noise
+        rec.dynamic_energy_threshold = False  # don't adapt to noise level
+        rec.pause_threshold          = 0.8
+        rec.non_speaking_duration    = 0.5
 
-        print("[JARVIS] 🎤 ElevenLabs Scribe STT started")
+        # Short filler words / mishears from background noise — ignore these
+        _NOISE_PHRASES = {
+            "", "uh", "um", "hmm", "hm", "ah", "oh", "the", "a", "and",
+            "yeah", "yes", "no", "ok", "okay", "huh", "what", "so", "i",
+            "you", "like", "mm", "mmm", "mhm", "uh huh", "right", "well",
+        }
+
+        print("[JARVIS] ElevenLabs Scribe STT started")
         self.ui.write_log("SYS: Microphone active (ElevenLabs Scribe) — speak to JARVIS.")
 
         def _transcribe_loop():
+            """
+            Keep microphone stream open continuously.
+            Re-opening every phrase causes device-busy errors and degrades accuracy.
+            """
+            import time as _time
             try:
                 mic = sr.Microphone(sample_rate=16000)
+
+                # Open once, keep open for entire session
                 with mic as source:
-                    rec.adjust_for_ambient_noise(source, duration=1)
-                    print("[JARVIS] 🎤 Ambient calibrated")
+                    rec.adjust_for_ambient_noise(source, duration=1.5)
+                    print("[JARVIS] Mic calibrated — listening continuously")
 
-                while True:
-                    if self.ui.muted or self._is_speaking:
-                        import time; time.sleep(0.15)
-                        continue
+                    while True:
+                        # Pause while muted or speaking (avoids echo)
+                        if self.ui.muted or self._is_speaking:
+                            _time.sleep(0.15)
+                            continue
 
-                    try:
-                        with mic as source:
-                            audio_data = rec.listen(source, timeout=4, phrase_time_limit=12)
+                        try:
+                            audio_data = rec.listen(source, timeout=5, phrase_time_limit=15)
 
-                        # Convert to WAV bytes for ElevenLabs
-                        wav_buf = io.BytesIO()
-                        with wave.open(wav_buf, "wb") as wf:
-                            wf.setnchannels(1)
-                            wf.setsampwidth(audio_data.sample_width)
-                            wf.setframerate(audio_data.sample_rate)
-                            wf.writeframes(audio_data.frame_data)
-                        wav_bytes = wav_buf.getvalue()
+                            # Convert to WAV for ElevenLabs Scribe
+                            wav_buf = io.BytesIO()
+                            with wave.open(wav_buf, "wb") as wf:
+                                wf.setnchannels(1)
+                                wf.setsampwidth(audio_data.sample_width)
+                                wf.setframerate(audio_data.sample_rate)
+                                wf.writeframes(audio_data.frame_data)
 
-                        # Send to ElevenLabs Scribe
-                        wav_buf.seek(0)
-                        wav_buf.name = "speech.wav"
-                        result = el_client.speech_to_text.convert(
-                            file=wav_buf,
-                            model_id="scribe_v2",
-                            language_code="eng",
-                        )
-                        text = (result.text or "").strip()
+                            wav_buf.seek(0)
+                            wav_buf.name = "speech.wav"
+                            result = el_client.speech_to_text.convert(
+                                file=wav_buf,
+                                model_id="scribe_v2",
+                                language_code="eng",
+                            )
+                            text = (result.text or "").strip()
 
-                        if text and len(text) > 1:
-                            print(f"[JARVIS] 🗣️ Scribe: {text}")
-                            self.ui._text_queue.put(text)
+                            # Reject obvious background noise mishears
+                            text_lower = text.lower().rstrip(".,!? ")
+                            if (
+                                text
+                                and len(text) > 2
+                                and text_lower not in _NOISE_PHRASES
+                                and len(text.split()) >= 2  # require at least 2 words
+                            ):
+                                print(f"[JARVIS] Heard: {text}")
+                                self.ui._text_queue.put(text)
+                            elif text:
+                                print(f"[JARVIS] Noise filtered: {text!r}")
 
-                    except sr.WaitTimeoutError:
-                        pass
-                    except sr.UnknownValueError:
-                        pass
-                    except Exception as e:
-                        print(f"[JARVIS] ⚠️ Scribe STT error: {e}")
-                        import time; time.sleep(1)
+                        except sr.WaitTimeoutError:
+                            pass  # silence — normal, keep listening
+                        except sr.UnknownValueError:
+                            pass  # unintelligible audio — keep listening
+                        except Exception as e:
+                            print(f"[JARVIS] Scribe error: {e}")
+                            _time.sleep(0.5)
 
             except Exception as e:
-                print(f"[JARVIS] ❌ Mic init failed: {e}")
+                print(f"[JARVIS] Mic init failed: {e}")
                 self.ui.write_log(f"SYS: Mic error — {e}")
 
         await loop.run_in_executor(None, _transcribe_loop)
@@ -896,36 +923,48 @@ class JarvisLive:
         """Fallback: Google STT when ElevenLabs key is absent."""
         # pyrefly: ignore [missing-import]
         import speech_recognition as sr
+        import time as _time
 
         loop = asyncio.get_event_loop()
         rec  = sr.Recognizer()
-        rec.energy_threshold         = 300
-        rec.dynamic_energy_threshold = True
+        rec.energy_threshold         = 1200   # ignore background noise
+        rec.dynamic_energy_threshold = False  # don't adapt to noise
         rec.pause_threshold          = 0.8
+        rec.non_speaking_duration    = 0.5
 
-        print("[JARVIS] 🎤 Google STT fallback started")
+        _NOISE = {
+            "", "uh", "um", "hmm", "hm", "ah", "oh", "the", "a", "and",
+            "yeah", "yes", "no", "ok", "okay", "huh", "what", "so", "i",
+            "you", "like", "mm", "mmm", "mhm", "uh huh", "right", "well",
+        }
+
+        print("[JARVIS] Google STT fallback started")
 
         def _loop():
             try:
                 mic = sr.Microphone()
                 with mic as source:
-                    rec.adjust_for_ambient_noise(source, duration=1)
-                while True:
-                    if self.ui.muted or self._is_speaking:
-                        import time; time.sleep(0.2)
-                        continue
-                    try:
-                        with mic as source:
+                    rec.adjust_for_ambient_noise(source, duration=1.5)
+                    print("[JARVIS] Google STT mic calibrated")
+
+                    while True:
+                        if self.ui.muted or self._is_speaking:
+                            _time.sleep(0.2)
+                            continue
+                        try:
                             audio = rec.listen(source, timeout=5, phrase_time_limit=15)
-                        text = rec.recognize_google(audio).strip()
-                        if text and len(text) > 1:
-                            self.ui._text_queue.put(text)
-                    except (sr.WaitTimeoutError, sr.UnknownValueError):
-                        pass
-                    except Exception as e:
-                        import time; time.sleep(1)
+                            text  = rec.recognize_google(audio).strip()
+                            tl    = text.lower().rstrip(".,!? ")
+                            if text and len(text.split()) >= 2 and tl not in _NOISE:
+                                self.ui._text_queue.put(text)
+                            elif text:
+                                print(f"[JARVIS] Noise filtered: {text!r}")
+                        except (sr.WaitTimeoutError, sr.UnknownValueError):
+                            pass
+                        except Exception:
+                            _time.sleep(1)
             except Exception as e:
-                print(f"[JARVIS] ❌ Google STT init failed: {e}")
+                print(f"[JARVIS] Google STT init failed: {e}")
 
         await loop.run_in_executor(None, _loop)
 
