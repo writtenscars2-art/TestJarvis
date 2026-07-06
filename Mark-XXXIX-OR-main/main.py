@@ -547,8 +547,8 @@ class JarvisLive:
                 )
                 model = groq_model
                 extra = {}
-                temperature = 0.4
-                top_p       = 1.0
+                temperature = 0.3   # lower = more accurate, less random
+                top_p       = 0.9
             else:
                 api_client  = client   # existing NVIDIA client
                 model       = deep_model if use_deep else fast_model
