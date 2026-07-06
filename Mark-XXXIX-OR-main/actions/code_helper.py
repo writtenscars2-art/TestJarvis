@@ -2,13 +2,13 @@
 # AI-powered code assistant â€” writes, edits, explains, runs, builds, debugs, and optimizes code.
 #
 # Actions:
-#   write        â†’ Describe what you want, Gemini writes it, saves to file
+#   write        â†’ Describe what you want, AI writes it, saves to file
 #   edit         â†’ Read existing file, apply natural language change
 #   explain      â†’ Explain what a piece of code or file does
 #   run          â†’ Execute a script file, return output
 #   build        â†’ Write â†’ Run â†’ Fix loop (max 3 attempts), speaks when done
-#   screen_debug â†’ Screenshot al, ekrandaki kodu/hatayÄ± Gemini ile analiz et ve dÃ¼zelt
-#   optimize     â†’ Mevcut kodu Gemini ile optimize et (performans, okunabilirlik, best practices)
+#   screen_debug â†’ Screenshot al, ekrandaki kodu/hatayÄ± AI ile analiz et ve dÃ¼zelt
+#   optimize     â†’ Mevcut kodu AI ile optimize et (performans, okunabilirlik, best practices)
 #   auto         â†’ (default) Intent auto-detected from context
 
 import subprocess

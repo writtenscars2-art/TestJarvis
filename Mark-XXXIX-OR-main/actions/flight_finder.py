@@ -63,7 +63,7 @@ def _parse_date(raw: str) -> str:
             f"Convert this date expression to YYYY-MM-DD: '{raw}'. "
             f"Return ONLY the date string, nothing else.",
             system="You are a date converter. Return only the YYYY-MM-DD string.",
-            model="gemini-2.5-flash-lite",
+            model="claude-3-5-haiku-20241022",
         ).strip()
         if re.match(r"\d{4}-\d{2}-\d{2}", result):
             return result

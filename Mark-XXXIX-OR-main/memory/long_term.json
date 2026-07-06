@@ -7,6 +7,10 @@
     "alias": {
       "value": "Deucalion",
       "updated": "2026-07-05"
+    },
+    "job": {
+      "value": "boss",
+      "updated": "2026-07-06"
     }
   },
   "preferences": {
@@ -16,7 +20,12 @@
     }
   },
   "projects": {},
-  "relationships": {},
+  "relationships": {
+    "colleagues": {
+      "value": "Jarvis",
+      "updated": "2026-07-06"
+    }
+  },
   "wishes": {},
   "notes": {
     "custom_command_login": {
@@ -71,6 +80,50 @@
   "user_state": {
     "user_mood": {
       "value": "reassuring",
+      "updated": "2026-07-06"
+    }
+  },
+  "user info": {
+    "name": {
+      "value": "Javi",
+      "updated": "2026-07-06"
+    },
+    "alias": {
+      "value": "Deucalion",
+      "updated": "2026-07-06"
+    },
+    "hungry": {
+      "value": "yes",
+      "updated": "2026-07-06"
+    },
+    "date": {
+      "value": "Saturday, July 4, 2026",
+      "updated": "2026-07-06"
+    },
+    "time": {
+      "value": "4:43 PM",
+      "updated": "2026-07-06"
+    },
+    "remember instructions": {
+      "value": "remember and execute recurring instructions automatically",
+      "updated": "2026-07-06"
+    },
+    "avoid bad notice": {
+      "value": "avoid bad notice during login or startup",
+      "updated": "2026-07-06"
+    },
+    "last saved": {
+      "value": "Monday, July 06, 2026 — 09:26 AM",
+      "updated": "2026-07-06"
+    }
+  },
+  "custom commands": {
+    "login": {
+      "value": "open world monitor",
+      "updated": "2026-07-06"
+    },
+    "activate": {
+      "value": "double clap",
       "updated": "2026-07-06"
     }
   }
