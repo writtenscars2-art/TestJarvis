@@ -1,0 +1,24 @@
+# API keys — never commit real keys
+Mark-XXXIX-OR-main/config/api_keys.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Logs and temp files
+*.log
+*.tmp
+jarvis_debug.log
+startup_out.txt
+startup_err.txt
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/settings.json
