@@ -986,7 +986,7 @@ class JarvisLive:
                 except Exception:
                     _mic_idx = None
 
-                mic = sr.Microphone(device_index=_mic_idx, sample_rate=16000)
+                mic = sr.Microphone(device_index=_mic_idx)
 
                 # Open once, keep open for entire session
                 with mic as source:
