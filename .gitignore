@@ -8,12 +8,17 @@ __pycache__/
 .venv/
 *.egg-info/
 
+# Memory — user-specific, never commit
+Mark-XXXIX-OR-main/memory/long_term.json
+
 # Logs and temp files
 *.log
 *.tmp
 jarvis_debug.log
 startup_out.txt
 startup_err.txt
+jarvis_out.txt
+jarvis_err.txt
 
 # Build artifacts
 build/
