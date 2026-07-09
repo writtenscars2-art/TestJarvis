@@ -870,10 +870,33 @@ class JarvisLive:
                 # Open app — "open X" or "launch X"
                 elif m := re.search(r"\b(?:open|launch|start)\s+(.+)", ut_lower):
                     app = m.group(1).strip()
+                    # "open browser" / "open my browser" → open the default browser directly
+                    if app in ("browser", "my browser", "the browser", "a browser", "web browser", "internet"):
+                        try:
+                            import subprocess as _sp, json as _j
+                            _cfg = _j.load(open(API_CONFIG_PATH, encoding="utf-8"))
+                            _browser = _cfg.get("default_browser", "msedge").strip().lower()
+                            _exe_map = {"msedge": "msedge", "edge": "msedge", "chrome": "chrome", "firefox": "firefox"}
+                            _exe = _exe_map.get(_browser, "msedge")
+                            _opened = False
+                            try:
+                                _sp.Popen([_exe], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                                _opened = True
+                            except FileNotFoundError:
+                                for _ep in [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                                            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"]:
+                                    if Path(_ep).exists():
+                                        _sp.Popen([_ep], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                                        _opened = True; break
+                            if not _opened:
+                                import webbrowser; webbrowser.open("about:blank")
+                            self.speak(f"Opening your browser, boss.")
+                        except Exception as _e:
+                            self.speak(f"Could not open browser, boss: {_e}")
+                        _handled = True
                     # Only use local override for app names (avoid "open a website", "open a new project" etc.)
-                    if len(app.split()) <= 3 and not any(x in app for x in ["website", "http", "www", "page", "browser"]):
+                    elif len(app.split()) <= 3 and not any(x in app for x in ["website", "http", "www", "page"]):
                         r = await self._execute_tool("open_app", {"app_name": app})
-                        # Speak the actual result — don't say success if it failed
                         spoken = r.get("result", "") if isinstance(r, dict) else str(r or "")
                         self.speak(spoken if spoken else f"Opening {app}, boss.")
                         _handled = True

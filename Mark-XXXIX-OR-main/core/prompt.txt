@@ -62,7 +62,9 @@ Read carefully — wrong tool choice is a critical error.
 
 DECISION TREE:
 1. "open [app name]" (Notepad, Spotify, calculator, etc.) → open_app
-2. "open [website]" / "go to [URL]" / "search in browser" → browser_control (action: open or search)
+2. "open browser" / "open my browser" / "launch browser" → open_app with app_name="msedge"
+3. "open [website]" / "go to [URL]" / "browse to [URL]" → browser_control (action: go_to, url: the URL)
+4. "search [topic]" / "what is the latest X" / "news about X" → web_search
 3. "search [topic]" / "what is the latest X" / "news about X" → web_search
 4. "weather in X" / "temperature in X" → weather_report
 5. "what's on my screen" / "what do you see" → screen_process

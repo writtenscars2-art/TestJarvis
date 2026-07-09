@@ -506,7 +506,33 @@ def browser_control(
         if action in ("go_to", "open", "navigate"):
             url = parameters.get("url", "")
             if not url:
-                result = "No URL provided."
+                # No URL — just open the browser to its homepage via subprocess
+                try:
+                    import json as _j
+                    _cfg = _j.load(open(_CONFIG_PATH, encoding="utf-8"))
+                    _browser = _cfg.get("default_browser", "msedge").strip().lower()
+                    _exe_map = {"msedge": "msedge", "edge": "msedge", "chrome": "chrome", "firefox": "firefox"}
+                    _exe = _exe_map.get(_browser, "msedge")
+                    import subprocess as _sp
+                    try:
+                        _sp.Popen([_exe], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                    except FileNotFoundError:
+                        _edge_paths = [
+                            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                        ]
+                        _opened = False
+                        for _ep in _edge_paths:
+                            if Path(_ep).exists():
+                                _sp.Popen([_ep], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                                _opened = True
+                                break
+                        if not _opened:
+                            import webbrowser
+                            webbrowser.open("about:blank")
+                    result = "Browser opened."
+                except Exception as _be:
+                    result = f"Could not open browser: {_be}"
             else:
                 result = _bt.run(_bt._go_to(url))
 
