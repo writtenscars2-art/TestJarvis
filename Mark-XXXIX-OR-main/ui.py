@@ -1055,7 +1055,8 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._build_header())
+        self._header_widget = self._build_header()
+        root.addWidget(self._header_widget)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -1072,7 +1073,8 @@ class MainWindow(QMainWindow):
         body.addWidget(self._right_panel, stretch=0)
 
         root.addLayout(body, stretch=1)
-        root.addWidget(self._build_footer())
+        self._footer_widget = self._build_footer()
+        root.addWidget(self._footer_widget)
 
         self._clock_tmr = QTimer(self)
         self._clock_tmr.timeout.connect(self._tick_clock)
@@ -1234,11 +1236,77 @@ class MainWindow(QMainWindow):
         return w
 
     def _toggle_ontop(self):
-        """Toggle the always-on-top window flag."""
+        """
+        Pin   → compact mode: orb only, small window, top-center, always-on-top.
+        Unpin → full mode:    all panels restored, normal size.
+        """
         self._ontop = not self._ontop
-        flags = self.windowFlags()
+
+        screen = QApplication.primaryScreen().availableGeometry()
+
         if self._ontop:
+            # ── COMPACT MODE: orb only, top-center ────────────────────────
+            # Hide all panels except the HUD (orb)
+            self._left_panel.hide()
+            self._right_panel.hide()
+            self._footer_widget.hide()
+            self._header_widget.hide()
+
+            # Shrink to just the orb (200×200) and pin top-center
+            orb_size = 220
+            x = (screen.width() - orb_size) // 2
+            y = 0
+            self.setMinimumSize(orb_size, orb_size)
+            self.resize(orb_size, orb_size)
+            self.move(x, y)
+
+            # Always on top
+            flags = self.windowFlags()
             flags |= Qt.WindowType.WindowStaysOnTopHint
+            flags |= Qt.WindowType.FramelessWindowHint   # no title bar in mini mode
+            self.setWindowFlags(flags)
+            self.setGeometry(x, y, orb_size, orb_size)
+            self.show()
+
+            # Update pin button style
+            self._pin_btn.setText("📌")
+            self._pin_btn.setToolTip("Click to expand full UI")
+            self._pin_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {C.ACC};
+                    border: 1px solid {C.ACC};
+                    border-radius: 4px;
+                    color: #000;
+                }}
+                QPushButton:hover {{ background: {C.ACC2}; }}
+            """)
+
+        else:
+            # ── FULL MODE: all panels, normal size ─────────────────────────
+            # Restore all panels
+            self._left_panel.show()
+            self._right_panel.show()
+            self._footer_widget.show()
+            self._header_widget.show()
+
+            # Restore to full size at top-center
+            win_w = min(1100, screen.width() - 40)
+            win_h = min(680,  screen.height() - 60)
+            x = (screen.width() - win_w) // 2
+            y = 0
+
+            # Remove frameless hint, keep always-on-top
+            flags = self.windowFlags()
+            flags &= ~Qt.WindowType.FramelessWindowHint
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+            self.setWindowFlags(flags)
+            self.setMinimumSize(_MIN_W, _MIN_H)
+            self.setGeometry(x, y, win_w, win_h)
+            self.show()
+
+            # Update pin button style
+            self._pin_btn.setText("📌")
+            self._pin_btn.setToolTip("Click to compact (orb only)")
             self._pin_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: {C.PRI_GHO};
@@ -1248,24 +1316,6 @@ class MainWindow(QMainWindow):
                 }}
                 QPushButton:hover {{ background: {C.BORDER_B}; }}
             """)
-            self._pin_btn.setToolTip("Always-on-top: ON (click to disable)")
-        else:
-            flags &= ~Qt.WindowType.WindowStaysOnTopHint
-            self._pin_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    border: 1px solid {C.BORDER};
-                    border-radius: 4px;
-                    color: {C.TEXT_DIM};
-                }}
-                QPushButton:hover {{ background: {C.PRI_GHO}; color: {C.PRI}; }}
-            """)
-            self._pin_btn.setToolTip("Always-on-top: OFF (click to enable)")
-        # Re-apply flags — window briefly hides/shows but keeps position
-        geo = self.geometry()
-        self.setWindowFlags(flags)
-        self.setGeometry(geo)
-        self.show()
 
     def _tick_clock(self):
         self._clock_lbl.setText(time.strftime("%H:%M:%S"))
