@@ -1237,74 +1237,75 @@ class MainWindow(QMainWindow):
 
     def _toggle_ontop(self):
         """
-        Pin   → compact mode: orb only, small window, top-center, always-on-top.
-        Unpin → full mode:    all panels restored, normal size.
+        Pin   → compact mode: orb only, small window (160×160), top-center, frameless, always-on-top.
+                Pin button floats over the orb so user can unpin.
+        Unpin → full mode: all panels restored, normal size.
         """
         self._ontop = not self._ontop
-
         screen = QApplication.primaryScreen().availableGeometry()
 
         if self._ontop:
-            # ── COMPACT MODE: orb only, top-center ────────────────────────
-            # Hide all panels except the HUD (orb)
+            # ── COMPACT MODE ───────────────────────────────────────────────
             self._left_panel.hide()
             self._right_panel.hide()
             self._footer_widget.hide()
             self._header_widget.hide()
 
-            # Shrink to just the orb (200×200) and pin top-center
-            orb_size = 220
+            # Orb-only window: 160×160, frameless, top-center, always-on-top
+            orb_size = 160
             x = (screen.width() - orb_size) // 2
-            y = 0
-            self.setMinimumSize(orb_size, orb_size)
-            self.resize(orb_size, orb_size)
-            self.move(x, y)
+            y = 4   # slight gap from top edge
 
-            # Always on top
-            flags = self.windowFlags()
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-            flags |= Qt.WindowType.FramelessWindowHint   # no title bar in mini mode
+            flags = (
+                Qt.WindowType.WindowStaysOnTopHint
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.Tool   # doesn't appear in taskbar
+            )
             self.setWindowFlags(flags)
+            self.setMinimumSize(orb_size, orb_size)
+            self.setMaximumSize(orb_size, orb_size)
             self.setGeometry(x, y, orb_size, orb_size)
             self.show()
 
-            # Update pin button style
-            self._pin_btn.setText("📌")
+            # Make orb fill the whole compact window
+            self.hud.setMinimumSize(orb_size, orb_size)
+            self.hud.setMaximumSize(orb_size, orb_size)
+
+            # Float the pin button over top-right corner of orb so user can unpin
+            self._pin_btn.setParent(self.centralWidget())
+            self._pin_btn.setFixedSize(22, 22)
+            self._pin_btn.move(orb_size - 26, 4)
+            self._pin_btn.raise_()
+            self._pin_btn.show()
+            self._pin_btn.setText("✕")
             self._pin_btn.setToolTip("Click to expand full UI")
             self._pin_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {C.ACC};
-                    border: 1px solid {C.ACC};
-                    border-radius: 4px;
-                    color: #000;
+                    background: rgba(255,60,60,200);
+                    border: none;
+                    border-radius: 11px;
+                    color: white;
+                    font-weight: bold;
+                    font-size: 10px;
                 }}
-                QPushButton:hover {{ background: {C.ACC2}; }}
+                QPushButton:hover {{ background: rgba(255,80,80,240); }}
             """)
 
         else:
-            # ── FULL MODE: all panels, normal size ─────────────────────────
-            # Restore all panels
+            # ── FULL MODE ──────────────────────────────────────────────────
+            # Restore panels
             self._left_panel.show()
             self._right_panel.show()
             self._footer_widget.show()
             self._header_widget.show()
 
-            # Restore to full size at top-center
-            win_w = min(1100, screen.width() - 40)
-            win_h = min(680,  screen.height() - 60)
-            x = (screen.width() - win_w) // 2
-            y = 0
+            # Restore orb size constraints
+            self.hud.setMinimumSize(300, 300)
+            self.hud.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
 
-            # Remove frameless hint, keep always-on-top
-            flags = self.windowFlags()
-            flags &= ~Qt.WindowType.FramelessWindowHint
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-            self.setWindowFlags(flags)
-            self.setMinimumSize(_MIN_W, _MIN_H)
-            self.setGeometry(x, y, win_w, win_h)
-            self.show()
-
-            # Update pin button style
+            # Move pin button back to header
+            self._pin_btn.setParent(self._header_widget)
+            self._pin_btn.setFixedSize(28, 28)
             self._pin_btn.setText("📌")
             self._pin_btn.setToolTip("Click to compact (orb only)")
             self._pin_btn.setStyleSheet(f"""
@@ -1316,6 +1317,25 @@ class MainWindow(QMainWindow):
                 }}
                 QPushButton:hover {{ background: {C.BORDER_B}; }}
             """)
+            # Re-add to header layout (last widget)
+            self._header_widget.layout().addSpacing(8)
+            self._header_widget.layout().addWidget(self._pin_btn)
+            self._pin_btn.show()
+
+            # Restore window
+            win_w = min(1100, screen.width() - 40)
+            win_h = min(680,  screen.height() - 60)
+            x = (screen.width() - win_w) // 2
+
+            flags = (
+                Qt.WindowType.WindowStaysOnTopHint
+                | Qt.WindowType.Window
+            )
+            self.setWindowFlags(flags)
+            self.setMinimumSize(_MIN_W, _MIN_H)
+            self.setMaximumSize(16777215, 16777215)
+            self.setGeometry(x, 0, win_w, win_h)
+            self.show()
 
     def _tick_clock(self):
         self._clock_lbl.setText(time.strftime("%H:%M:%S"))

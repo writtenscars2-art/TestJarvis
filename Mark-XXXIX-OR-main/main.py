@@ -624,7 +624,7 @@ class JarvisLive:
                     api_key=groq_key,
                 )
                 model       = groq_model
-                temperature = 0.1    # very low = maximally deterministic tool selection
+                temperature = 0.0    # zero = fully deterministic, best intent understanding
                 top_p       = 1.0
                 extra       = {}
             else:
