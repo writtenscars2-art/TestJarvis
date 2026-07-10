@@ -265,10 +265,7 @@ def _focus_window(title: str) -> str:
             f'set frontmost of (first process whose name contains "{title}") to true'
         )
         try:
-            subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True, timeout=5,
-            )
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
             time.sleep(0.3)
             return f"Focused window: {title}"
         except Exception as e:
@@ -276,28 +273,156 @@ def _focus_window(title: str) -> str:
 
     if os_name == "linux":
         try:
-            result = subprocess.run(
-                ["wmctrl", "-a", title],
-                capture_output=True, timeout=5,
-            )
+            result = subprocess.run(["wmctrl", "-a", title], capture_output=True, timeout=5)
             if result.returncode == 0:
-                time.sleep(0.3)
                 return f"Focused window: {title}"
         except FileNotFoundError:
             pass
         try:
-            result = subprocess.run(
-                ["xdotool", "search", "--name", title, "windowactivate"],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
+            subprocess.run(["xdotool", "search", "--name", title, "windowactivate"],
+                           capture_output=True, timeout=5)
             return f"Focused window: {title}"
-        except FileNotFoundError:
-            return "focus_window (Linux) requires wmctrl or xdotool"
         except Exception as e:
             return f"focus_window (Linux) failed: {e}"
 
-    return f"focus_window: unknown OS '{os_name}'"
+    return f"focus_window: unknown OS"
+
+
+def _close_app(title: str) -> str:
+    """Close an app window by title."""
+    if not title:
+        # Close active window
+        if _PYAUTOGUI:
+            import platform as _pl
+            if _pl.system() == "Windows":
+                pyautogui.hotkey("alt", "f4")
+            else:
+                pyautogui.hotkey("command", "q")
+            return "Closed active window."
+        return "No app title provided."
+    try:
+        import pygetwindow as gw
+        wins = gw.getWindowsWithTitle(title)
+        if wins:
+            wins[0].close()
+            time.sleep(0.5)
+            return f"Closed: {title}"
+    except Exception:
+        pass
+    # Fallback: use taskkill
+    try:
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", f"{title}.exe"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            return f"Closed: {title}"
+    except Exception:
+        pass
+    return f"Could not close: {title}"
+
+
+def _minimize_app(title: str) -> str:
+    """Minimize an app window."""
+    if not title:
+        if _PYAUTOGUI:
+            pyautogui.hotkey("win", "down")
+            return "Minimized active window."
+        return "No app title provided."
+    try:
+        import pygetwindow as gw
+        wins = gw.getWindowsWithTitle(title)
+        if wins:
+            wins[0].minimize()
+            return f"Minimized: {title}"
+    except Exception as e:
+        return f"Could not minimize {title}: {e}"
+    return f"Window not found: {title}"
+
+
+def _maximize_app(title: str) -> str:
+    """Maximize an app window."""
+    if not title:
+        if _PYAUTOGUI:
+            pyautogui.hotkey("win", "up")
+            return "Maximized active window."
+        return "No app title provided."
+    try:
+        import pygetwindow as gw
+        wins = gw.getWindowsWithTitle(title)
+        if wins:
+            wins[0].maximize()
+            return f"Maximized: {title}"
+    except Exception as e:
+        return f"Could not maximize {title}: {e}"
+    return f"Window not found: {title}"
+
+
+def _alt_tab() -> str:
+    """Switch to the next app via Alt+Tab."""
+    if not _PYAUTOGUI:
+        return "pyautogui not available."
+    pyautogui.hotkey("alt", "tab")
+    return "Switched to next app."
+
+
+def _list_running_apps() -> str:
+    """List currently running apps with visible windows."""
+    try:
+        import pygetwindow as gw
+        wins = gw.getAllTitles()
+        # Filter out empty/system titles
+        apps = sorted(set(w.strip() for w in wins if w.strip() and len(w.strip()) > 2))
+        if apps:
+            return "Running apps: " + ", ".join(apps[:20])
+        return "No running apps found."
+    except Exception:
+        pass
+    # Fallback: tasklist
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=5
+        )
+        lines = result.stdout.strip().splitlines()
+        names = sorted(set(
+            line.split(",")[0].strip('"').replace(".exe", "")
+            for line in lines if line.strip()
+        ))
+        return "Running processes: " + ", ".join(names[:20])
+    except Exception as e:
+        return f"Could not list apps: {e}"
+
+
+def _force_kill(app: str) -> str:
+    """Force kill an app by name or title."""
+    if not app:
+        return "Please specify which app to close."
+    # Try taskkill with exact name
+    for exe in [app, f"{app}.exe", f"{app.lower()}.exe"]:
+        try:
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", exe],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return f"Force closed: {app}"
+        except Exception:
+            pass
+    # Try by process name via psutil
+    try:
+        import psutil
+        app_lower = app.lower()
+        killed = []
+        for proc in psutil.process_iter(["pid", "name"]):
+            if app_lower in proc.info["name"].lower():
+                proc.kill()
+                killed.append(proc.info["name"])
+        if killed:
+            return f"Force closed: {', '.join(killed)}"
+    except Exception:
+        pass
+    return f"Could not find process: {app}"
 def _screen_find(description: str) -> tuple[int, int] | None:
     try:
         import base64
@@ -462,6 +587,34 @@ def computer_control(
 
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
+
+        # ── APP CONTROL ──────────────────────────────────────────────────
+
+        if action in ("close_app", "close_window", "kill_app"):
+            title = params.get("title", "") or params.get("app", "")
+            return _close_app(title)
+
+        if action in ("minimize_app", "minimize_window"):
+            title = params.get("title", "") or params.get("app", "")
+            return _minimize_app(title)
+
+        if action in ("maximize_app", "maximize_window"):
+            title = params.get("title", "") or params.get("app", "")
+            return _maximize_app(title)
+
+        if action in ("switch_app", "switch_window", "bring_to_front"):
+            title = params.get("title", "") or params.get("app", "")
+            return _focus_window(title) if title else _alt_tab()
+
+        if action == "alt_tab":
+            return _alt_tab()
+
+        if action in ("list_apps", "list_windows", "running_apps"):
+            return _list_running_apps()
+
+        if action in ("force_close", "force_kill"):
+            app = params.get("app", "") or params.get("title", "")
+            return _force_kill(app)
 
         if action == "random_data":
             dt     = params.get("type", "name")

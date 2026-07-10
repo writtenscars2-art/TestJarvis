@@ -207,8 +207,8 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "computer_control",
-        "description": "Direct mouse and keyboard automation: move mouse, click at coordinates, type text, press hotkeys (e.g. Ctrl+C), scroll wheel, take screenshot. Use when the user wants to interact with a specific location on screen.",
-        "parameters": {"type": "object", "properties": {"action": {"type": "string", "description": "click, type, hotkey, scroll, screenshot, move"}, "text": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}, "keys": {"type": "string"}, "key": {"type": "string"}, "direction": {"type": "string"}, "amount": {"type": "integer"}, "seconds": {"type": "number"}, "title": {"type": "string"}, "path": {"type": "string"}}, "required": ["action"]}
+        "description": "Mouse/keyboard automation AND app control. Mouse: click, move, drag. Keyboard: type, hotkey, press. App control: close_app (close an app by title), minimize_app, maximize_app, switch_app (bring to front), list_apps (see running apps), force_close (kill process), alt_tab (switch windows). Also: scroll, screenshot.",
+        "parameters": {"type": "object", "properties": {"action": {"type": "string", "description": "click, type, hotkey, scroll, screenshot, move, focus_window, close_app, minimize_app, maximize_app, switch_app, list_apps, force_close, alt_tab"}, "text": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}, "keys": {"type": "string"}, "key": {"type": "string"}, "direction": {"type": "string"}, "amount": {"type": "integer"}, "seconds": {"type": "number"}, "title": {"type": "string", "description": "Window or app name for app control actions"}, "app": {"type": "string"}, "path": {"type": "string"}}, "required": ["action"]}
     },
     {
         "name": "game_updater",
@@ -476,19 +476,8 @@ class JarvisLive:
 
                 def _shutdown():
                     import time as _t, os as _os
-                    _t.sleep(2.5)
-                    # Schedule quit on Qt main thread via QTimer
-                    try:
-                        from PyQt6.QtCore import QTimer
-                        from PyQt6.QtWidgets import QApplication
-                        app = QApplication.instance()
-                        if app:
-                            QTimer.singleShot(0, app.quit)
-                            _t.sleep(1.0)
-                    except Exception:
-                        pass
-                    # Hard exit — guaranteed to work regardless of Qt state
-                    _os._exit(0)
+                    _t.sleep(2.5)   # wait for TTS to finish speaking
+                    _os._exit(0)    # hard exit — guaranteed, no Qt dependency
 
                 threading.Thread(target=_shutdown, daemon=False).start()
             else:
@@ -926,7 +915,12 @@ class JarvisLive:
                     _handled = True
 
                 # JARVIS shutdown
-                elif ut_lower in ("goodbye", "bye jarvis", "exit jarvis", "quit jarvis", "shut down jarvis", "goodbye jarvis"):
+                elif any(phrase in ut_lower for phrase in (
+                    "goodbye", "bye jarvis", "exit jarvis", "quit jarvis",
+                    "shut down jarvis", "shutdown jarvis", "goodbye jarvis",
+                    "turn off jarvis", "close jarvis", "stop jarvis",
+                    "jarvis shutdown", "jarvis exit", "jarvis quit",
+                )):
                     await self._execute_tool("shutdown_jarvis", {})
                     _handled = True
 

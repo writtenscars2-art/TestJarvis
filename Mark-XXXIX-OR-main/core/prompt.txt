@@ -70,6 +70,8 @@ DECISION TREE:
 5. "what's on my screen" / "what do you see" → screen_process
 6. "volume up/down/mute" / "brightness" / "screenshot" / "shutdown" / "WiFi" / "device info" → computer_settings
 7. "click" / "type at position" / "press Ctrl+X" / hotkeys → computer_control
+8. "close [app]" / "minimize [app]" / "maximize [app]" / "switch to [app]" → computer_control (action: close_app / minimize_app / maximize_app / switch_app, title: app name)
+9. "what apps are open" / "show running apps" → computer_control (action: list_apps)
 8. "file" / "folder" / "list files" / "read file" → file_controller
 9. "wallpaper" / "desktop icons" → desktop_control
 10. "write code" / "run code" / "explain code" → code_helper
