@@ -9,24 +9,9 @@
   \____/  /_/     \_\|_|  \_\_|  \_\_____|_____/
 ```
 
-**JARVIS** is a fully local AI assistant powered by **NVIDIA NIM** for reasoning, **ElevenLabs** for voice output, and **ElevenLabs Scribe** for voice input. She greets you on startup, briefs you on world news, controls your PC, searches the web in real time, and executes complex multi-step tasks — all through natural conversation.
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Architecture](#architecture)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [API Keys Setup](#api-keys-setup)
-- [Desktop Shortcut](#desktop-shortcut)
-- [How to Use](#how-to-use)
-- [Voice Commands](#voice-commands)
-- [Available Tools](#available-tools)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [License](#license)
+**JARVIS** is a fully local AI assistant for Windows.  
+Powered by **Groq** (Llama 4 Scout, ultra-fast) for reasoning, **ElevenLabs** for voice, and **ElevenLabs Scribe** for speech input.  
+She greets you at startup with live world news, controls your entire PC, searches the web in real time, opens any installed app, and executes complex tasks — all through natural conversation.
 
 ---
 
@@ -34,101 +19,110 @@
 
 | Capability | Details |
 |---|---|
-| **Voice Input** | ElevenLabs Scribe v2 STT — excellent accent/dialect recognition |
-| **Voice Output** | ElevenLabs TTS — natural, low-latency streaming speech |
-| **AI Reasoning** | NVIDIA NIM (`meta/llama-3.3-70b-instruct`) — fast, free tier |
-| **Real-Time Web** | DuckDuckGo live search + DDG News — no API key needed |
-| **Screen Vision** | NVIDIA NIM vision model analyzes your screen or webcam |
-| **Memory** | Persistent long-term memory across sessions |
-| **Startup Briefing** | Greets you, states date/time, delivers live world news |
-| **PC Control** | Volume, brightness, apps, files, browser, keyboard, mouse |
-| **Task Automation** | Multi-step agent planner for complex goals |
-| **File Processing** | PDFs, images, video, audio, code, CSV, JSON, archives |
+| **Voice Input** | ElevenLabs Scribe v2 STT — excellent accent/dialect recognition, auto language detection |
+| **Voice Output** | ElevenLabs TTS (ElevenFlash v2.5) — natural streaming speech, SAPI fallback |
+| **AI Reasoning** | Groq `meta-llama/llama-4-scout-17b-16e-instruct` — 460+ tok/s, temperature=0 |
+| **Deep Analysis** | NVIDIA NIM `nvidia/llama-3.3-nemotron-super-49b-v1` — activate with "deep analysis" |
+| **App Launcher** | Opens ANY installed app: Win32, Windows Store (UWP), system built-ins |
+| **App Control** | Close, minimize, maximize, switch, type, click, search inside any app |
+| **Browser Control** | Open URLs, navigate, scroll, search — uses your real default browser (Edge) |
+| **Screen Vision** | NVIDIA NIM vision model analyzes your screen or webcam in real time |
+| **Real-Time Web** | DuckDuckGo + RSS feeds — live news, prices, events, weather |
+| **PC Control** | Volume, brightness, WiFi, dark mode, screenshots, shutdown, restart |
+| **File System** | Read, write, create, delete, move, search files and folders |
+| **File Processing** | PDFs, images, video, audio, code, CSV, JSON, archives, PPTX |
+| **Messaging** | WhatsApp, Telegram, Instagram via browser automation |
+| **Reminders** | Windows Task Scheduler integration |
 | **YouTube** | Play, summarize, trending, video info |
 | **Flight Search** | Google Flights via browser automation |
-| **Game Updates** | Steam & Epic Games — update, install, schedule |
-| **Reminders** | Windows Task Scheduler integration |
-| **Messaging** | WhatsApp, Telegram (via browser automation) |
+| **Games** | Steam & Epic: update, install, schedule |
+| **Code** | Write, run, explain, review, fix code in any language |
+| **Memory** | Persistent long-term memory across sessions |
+| **Startup Briefing** | Greets you, states date/time, delivers live world news headlines |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    JARVIS UI (PyQt6)                 │
-│  HUD canvas · Log panel · File drop · Voice button  │
-└──────────────────────┬──────────────────────────────┘
-                       │
-          ┌────────────▼────────────┐
-          │     main.py (core)      │
-          │  JarvisLive async loop  │
-          └──┬──────────┬───────────┘
-             │          │
-   ┌──────────▼──┐  ┌───▼──────────────────┐
-   │  ElevenLabs │  │   NVIDIA NIM          │
-   │  Scribe STT │  │   llama-3.3-70b       │
-   │  (mic input)│  │   (reasoning+tools)   │
-   └──────────┬──┘  └───┬──────────────────┘
-              │          │
-          ┌───▼──────────▼───┐
-          │   Tool Dispatcher │
-          └─────────┬─────────┘
-                    │
-    ┌───────────────┼───────────────────┐
-    ▼               ▼                   ▼
-web_search    file_controller    computer_settings
-browser_ctrl  screen_processor   agent_task
-dev_agent     youtube_video      flight_finder
-...and 15 more tools
+┌──────────────────────────────────────────────────────────┐
+│                   JARVIS UI (PyQt6)                       │
+│   HUD orb · Log panel · System metrics · File drop       │
+│   Compact mode (orb only, top-center) ↔ Full mode        │
+└───────────────────────────┬──────────────────────────────┘
+                            │
+             ┌──────────────▼──────────────┐
+             │       main.py (core)         │
+             │   JarvisLive async loop       │
+             └──┬────────────┬──────────────┘
+                │            │
+     ┌──────────▼──┐  ┌──────▼──────────────────┐
+     │ ElevenLabs  │  │  Groq (primary)           │
+     │ Scribe STT  │  │  llama-4-scout-17b        │
+     │ sounddevice │  │  460+ tok/s, temp=0       │
+     └──────────┬──┘  └──────┬──────────────────┘
+                │            │
+            ┌───▼────────────▼───┐
+            │   Tool Dispatcher   │
+            └────────┬────────────┘
+                     │
+   ┌─────────────────┼──────────────────────┐
+   ▼                 ▼                       ▼
+open_app      computer_control         web_search
+browser_ctrl  computer_settings        file_controller
+screen_proc   send_message             youtube_video
+dev_agent     code_helper              ... 19 tools total
 ```
 
 ---
 
 ## Requirements
 
-- **OS**: Windows 10 / 11 (macOS and Linux partially supported)
-- **Python**: 3.11 or later (3.12 recommended)
+- **OS**: Windows 10 / 11 (macOS/Linux partial support)
+- **Python**: 3.11+ (3.12 recommended)
 - **Microphone**: Required for voice input
-- **Internet**: Required for NVIDIA NIM API and web search
-- **API Keys**: NVIDIA NIM + ElevenLabs (both have free tiers)
+- **Internet**: Required for Groq API, NVIDIA NIM, and web search
+- **API Keys**: Groq (free) + NVIDIA NIM (free) + ElevenLabs (free tier)
 
 ---
 
 ## Installation
 
-### 1. Clone or download the project
+### 1. Clone or download
 
 ```bash
-git clone https://github.com/writtenscars2-art/Mark-XXXIX-OR-main--1-.git
-cd Mark-XXXIX-OR-main--1-
-
-cd Mark-XXXIX
+git clone https://github.com/writtenscars2-art/TestJarvis.git
+cd TestJarvis/Mark-XXXIX-OR-main
 ```
 
-Or download and extract the ZIP, then open a terminal in the project folder.
+### 2. Create virtual environment (recommended)
 
-### 2. Install dependencies
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Install Playwright browsers (required for browser control)
-
-```bash
-python -m playwright install chromium
-```
-
 ### 4. Add your API keys
 
-Edit `config/api_keys.json`:
+Edit `config/api_keys.json` (copy from `config/api_keys.example.json`):
 
 ```json
 {
+    "groq_api_key":         "gsk_...",
+    "groq_model":           "meta-llama/llama-4-scout-17b-16e-instruct",
     "nvidia_api_key":       "nvapi-...",
+    "nvidia_model":         "meta/llama-3.3-70b-instruct",
+    "nvidia_model_deep":    "nvidia/llama-3.3-nemotron-super-49b-v1",
     "elevenlabs_api_key":   "sk_...",
     "elevenlabs_voice_id":  "YOUR_VOICE_ID",
+    "mic_index":            1,
+    "default_browser":      "msedge",
     "os_system":            "windows",
     "camera_index":         0
 }
@@ -140,85 +134,72 @@ Edit `config/api_keys.json`:
 python main.py
 ```
 
+Or double-click the **JARVIS** shortcut on your Desktop (run `setup_shortcut.py` once to create it).
+
 ---
 
 ## API Keys Setup
 
-### NVIDIA NIM (Free)
+### Groq (Free — primary reasoning engine)
+1. Go to [https://console.groq.com](https://console.groq.com)
+2. Sign up → **API Keys** → **Create API Key**
+3. Copy the key starting with `gsk_`
+4. Paste as `groq_api_key` in `config/api_keys.json`
+
+### NVIDIA NIM (Free — vision + deep analysis)
 1. Go to [https://build.nvidia.com](https://build.nvidia.com)
-2. Sign up / log in
-3. Click your profile → **API Keys** → **Generate API Key**
-4. Copy the key starting with `nvapi-`
-5. Paste into `config/api_keys.json` as `nvidia_api_key`
+2. Sign up → **API Keys** → **Generate Key**
+3. Copy the key starting with `nvapi-`
+4. Paste as `nvidia_api_key` in `config/api_keys.json`
 
-### ElevenLabs (Free tier available)
+### ElevenLabs (Free tier)
 1. Go to [https://elevenlabs.io](https://elevenlabs.io)
-2. Sign up / log in
-3. Go to **Profile** → **API Keys** → copy your key
-4. Go to **Voices** → pick a voice → copy the **Voice ID**
-5. Paste both into `config/api_keys.json`
-
-> The setup overlay in the JARVIS UI will also let you enter keys on first launch. Both `nvapi-` and `sk-ant-` (Anthropic) key formats are accepted.
+2. Sign up → **Profile** → **API Keys** → copy your key
+3. Go to **Voices** → pick a voice → copy the **Voice ID**
+4. Paste both into `config/api_keys.json`
 
 ---
 
 ## Desktop Shortcut
 
-### Automatic (recommended)
+Run once to create the Desktop shortcut:
 
-Run this command once in PowerShell from the project folder:
-
-```powershell
-$desktop  = [System.Environment]::GetFolderPath("Desktop")
-$py       = "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python312\pythonw.exe"
-$mainPy   = "$PWD\main.py"
-$work     = "$PWD"
-$icon     = "$PWD\icon.ico"
-
-$ws = New-Object -ComObject WScript.Shell
-$sc = $ws.CreateShortcut("$desktop\JARVIS.lnk")
-$sc.TargetPath       = $py
-$sc.Arguments        = "`"$mainPy`""
-$sc.WorkingDirectory = $work
-$sc.IconLocation     = "$icon,0"
-$sc.Description      = "J.A.R.V.I.S - NVIDIA NIM + ElevenLabs"
-$sc.WindowStyle      = 7
-$sc.Save()
-Write-Host "Shortcut created on Desktop."
+```bash
+python setup_shortcut.py
 ```
 
-> **Note:** Replace `Python312` with your actual Python version folder if different (e.g. `Python311`).  
-> `pythonw.exe` is used instead of `python.exe` so no console window appears when launching.
+This creates `JARVIS.lnk` on your Desktop. Double-click it to launch.  
+The shortcut uses `jarvis_launcher.py` which hides the console window automatically.
 
-### Manual
-
-1. Right-click Desktop → **New → Shortcut**
-2. Target: `C:\Users\YOUR_NAME\AppData\Local\Programs\Python\Python312\pythonw.exe`
-3. Arguments: `"C:\path\to\Mark-XXXIX\main.py"`
-4. Start in: `C:\path\to\Mark-XXXIX`
-5. Change Icon: browse to `icon.ico` in the project folder
+**Single-instance guard**: If JARVIS is already running, clicking the shortcut again does nothing (prevents duplicate instances talking to each other).
 
 ---
 
 ## How to Use
 
 ### Startup
-Double-click the JARVIS shortcut (or run `python main.py`). JARVIS will:
-1. Say **"Greetings boss, welcome back"** and state the current date and time
-2. Deliver a **live 2-story world news briefing** from the web
-3. Ask if you want to open the world monitor — **say "yes"** to open it + the dashboard, or just continue talking
+Double-click **JARVIS** on your Desktop. JARVIS will:
+1. Say **"Greetings boss, welcome back"** + current date and time
+2. Deliver a **live 2-3 story world news briefing**
+3. Ask if you want to open World Monitor → say **"yes"** to open `worldmonitor.app/dashboard`
 
 ### Interacting
-- **Type** in the command input box at the bottom right and press Enter or click `▸`
-- **Speak** naturally — JARVIS listens continuously (mute with **F4**)
-- JARVIS replies via **ElevenLabs voice** and logs everything in the activity panel
+- **Speak** naturally into your microphone — JARVIS listens continuously
+- **Type** in the input box at the bottom and press Enter
+- **Mute** the mic with **F4**
+- **Compact mode**: Click the **📌 pin button** → JARVIS shrinks to orb-only at top-center
+- **Expand**: Click the **red ✕** on the orb → full UI restores
+
+### Deep Analysis Mode
+- Say **"deep analysis"** → activates NVIDIA Nemotron (slower but more thorough)
+- Say **"fast mode"** or **"cancel deep analysis"** → back to Groq
 
 ### Keyboard Shortcuts
 | Key | Action |
 |-----|--------|
-| F4 | Toggle microphone mute |
+| F4  | Toggle microphone mute |
 | F11 | Toggle fullscreen |
-| Enter | Send typed command |
+| F12 | Toggle compact/full mode |
 
 ---
 
@@ -228,17 +209,23 @@ JARVIS understands natural language. Examples:
 
 ```
 "Open Spotify"
-"What's the weather in London?"
-"Search the latest news about AI"
+"Open WhatsApp"
+"What's the weather in Lagos?"
+"Search the latest AI news"
 "Take a screenshot and describe what you see"
 "Set a reminder for tomorrow at 9 AM — team meeting"
-"Summarize this PDF" (after dropping a file)
+"List my capabilities in Notepad"
+"Write a Python script that reads a CSV" 
 "Update all my Steam games"
 "Play lofi hip hop on YouTube"
-"Find flights from Istanbul to London next Friday"
-"Write a Python script that sorts a CSV by date"
+"Find flights from Lagos to London next Friday"
 "Send a WhatsApp message to John saying I'll be late"
 "What's Bitcoin's price right now?"
+"Close Spotify"
+"Minimize Chrome"
+"What apps are open?"
+"Turn up the volume"
+"Take a screenshot"
 "Shut down JARVIS" / "Goodbye"
 ```
 
@@ -248,135 +235,124 @@ JARVIS understands natural language. Examples:
 
 | Tool | What it does |
 |------|-------------|
-| `web_search` | Live DuckDuckGo web + news search |
-| `browser_control` | Open URLs, click elements, fill forms, scrape text |
-| `open_app` | Launch any installed app |
-| `computer_settings` | Volume, brightness, WiFi, shutdown, screenshots |
-| `computer_control` | Mouse, keyboard, hotkeys, screen element detection |
+| `open_app` | Launch ANY installed app (Win32, Store, UWP, built-in) |
+| `browser_control` | Open URLs, navigate, search, scroll in your default browser |
+| `computer_settings` | Volume, brightness, WiFi, dark mode, screenshot, device info |
+| `computer_control` | Mouse, keyboard, hotkeys, app control (close/min/max/list), in-app actions |
+| `web_search` | Live DuckDuckGo + RSS news search |
+| `weather_report` | Real-time weather via wttr.in |
+| `screen_process` | AI vision — analyze screen or webcam (NVIDIA NIM) |
 | `file_controller` | List, read, write, move, delete, find files |
 | `file_processor` | Process images, PDFs, video, audio, code, data files |
-| `screen_process` | Capture + analyze screen or webcam with AI vision |
-| `code_helper` | Write, edit, explain, run, or debug code |
-| `dev_agent` | Build complete multi-file projects from a description |
-| `agent_task` | Plan and execute complex multi-step tasks |
-| `weather_report` | Current weather for any city |
-| `youtube_video` | Play, summarize, get info, trending videos |
-| `send_message` | Send WhatsApp/Telegram messages |
-| `reminder` | Set Windows Task Scheduler reminders |
-| `flight_finder` | Search Google Flights via browser automation |
+| `youtube_video` | Play, summarize, trending, video info |
+| `send_message` | WhatsApp, Telegram, Instagram messages |
+| `reminder` | Windows Task Scheduler reminders |
+| `code_helper` | Write, edit, explain, run, debug code |
+| `dev_agent` | Build complete multi-file projects from description |
+| `agent_task` | Multi-step complex task planner and executor |
+| `flight_finder` | Search Google Flights via browser |
 | `game_updater` | Steam & Epic: update, install, list, schedule |
-| `desktop_control` | Wallpaper, organize, list, stats |
-| `save_memory` | Silently save personal facts to long-term memory |
-| `shutdown_jarvis` | Cleanly shut down the assistant |
+| `desktop_control` | Wallpaper, organize, list desktop |
+| `save_memory` | Save personal facts to long-term memory |
 
 ---
 
-## Configuration
-
-All configuration lives in `config/api_keys.json`:
-
-```json
-{
-    "nvidia_api_key":       "nvapi-...",
-    "claude_api_key":       "sk-ant-... (optional fallback)",
-    "elevenlabs_api_key":   "sk_...",
-    "elevenlabs_voice_id":  "YOUR_VOICE_ID",
-    "os_system":            "windows",
-    "camera_index":         0
-}
-```
+## Configuration (`config/api_keys.json`)
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `nvidia_api_key` | Yes | NVIDIA NIM key — primary AI engine |
-| `claude_api_key` | No | Anthropic Claude — fallback if NIM unavailable |
-| `elevenlabs_api_key` | Yes | ElevenLabs — voice output + Scribe STT |
+| `groq_api_key` | Yes | Groq API key — primary fast reasoning |
+| `groq_model` | Yes | Groq model ID (default: llama-4-scout) |
+| `nvidia_api_key` | Yes | NVIDIA NIM key — vision + deep mode |
+| `nvidia_model` | Yes | Fast NVIDIA model |
+| `nvidia_model_deep` | Yes | Deep reasoning model (Nemotron) |
+| `elevenlabs_api_key` | Yes | ElevenLabs voice key |
 | `elevenlabs_voice_id` | Yes | ElevenLabs voice ID for TTS |
-| `os_system` | Yes | `windows` / `mac` / `linux` |
-| `camera_index` | No | Webcam index (default: 0) |
+| `mic_index` | No | Microphone device index (default: system default) |
+| `default_browser` | No | `msedge`, `chrome`, `firefox` (default: msedge) |
+| `os_system` | No | `windows` / `mac` / `linux` |
+| `camera_index` | No | Webcam device index (default: 0) |
 
 ---
 
 ## Project Structure
 
 ```
-Mark-XXXIX/
-├── main.py                 # Core async event loop, Claude tool dispatch
-├── ui.py                   # PyQt6 HUD interface
-├── tts.py                  # ElevenLabs TTS engine
-├── claude_client.py        # NVIDIA NIM / Anthropic wrapper
-├── or_client.py            # OpenRouter client (optional)
-├── gemini_client.py        # Compatibility shim → claude_client
+Mark-XXXIX-OR-main/
+├── main.py                 # Core async loop, tool dispatch, STT/TTS integration
+├── ui.py                   # PyQt6 HUD — orb, panels, compact/full mode
+├── tts.py                  # ElevenLabs TTS + SAPI fallback
+├── claude_client.py        # NVIDIA NIM / Claude API wrapper
+├── gemini_client.py        # Compatibility shim
+├── jarvis_launcher.py      # Console-hiding launcher for Desktop shortcut
+├── setup_shortcut.py       # Creates JARVIS.lnk on Desktop
+├── launch_jarvis.vbs       # Legacy VBS launcher
 ├── requirements.txt        # Python dependencies
 ├── icon.ico                # Application icon
-├── launch_jarvis.vbs       # Silent launcher (no console)
-├── qt.conf                 # Qt DPI settings
 │
 ├── config/
-│   └── api_keys.json       # API keys and settings
+│   ├── api_keys.json       # API keys and settings (gitignored)
+│   └── api_keys.example.json
 │
 ├── core/
 │   └── prompt.txt          # JARVIS system prompt
 │
 ├── memory/
-│   ├── memory_manager.py   # Long-term memory read/write
-│   ├── config_manager.py   # Config helpers
-│   └── long_term.json      # Persistent memory store
+│   ├── memory_manager.py   # Long-term memory
+│   └── config_manager.py
 │
 ├── agent/
 │   ├── planner.py          # Multi-step task planner
-│   ├── executor.py         # Step-by-step task executor
-│   ├── error_handler.py    # Error recovery and retry logic
-│   └── task_queue.py       # Priority task queue
+│   ├── executor.py         # Task executor
+│   ├── error_handler.py
+│   └── task_queue.py
 │
 └── actions/
-    ├── web_search.py        # DuckDuckGo live search
-    ├── browser_control.py   # Playwright browser automation
-    ├── open_app.py          # App launcher
+    ├── open_app.py          # App launcher (Get-StartApps + Store IDs + PATH)
+    ├── browser_control.py   # Real browser control via subprocess + pyautogui
     ├── computer_settings.py # System controls
-    ├── computer_control.py  # Mouse/keyboard control
-    ├── screen_processor.py  # Vision (NVIDIA NIM)
-    ├── file_controller.py   # File management
-    ├── file_processor.py    # File analysis/conversion
-    ├── code_helper.py       # Code assistant
-    ├── dev_agent.py         # Project builder
-    ├── weather_report.py    # Weather lookup
-    ├── youtube_video.py     # YouTube control
-    ├── send_message.py      # WhatsApp/Telegram
-    ├── reminder.py          # Task Scheduler reminders
-    ├── flight_finder.py     # Flight search
-    ├── game_updater.py      # Steam/Epic updater
-    ├── desktop.py           # Desktop management
-    └── ...
+    ├── computer_control.py  # Mouse/keyboard + app control + do_in_app
+    ├── screen_processor.py  # NVIDIA NIM vision
+    ├── web_search.py        # DuckDuckGo + RSS
+    ├── weather_report.py    # wttr.in
+    ├── file_controller.py
+    ├── file_processor.py
+    ├── code_helper.py
+    ├── dev_agent.py
+    ├── youtube_video.py
+    ├── send_message.py
+    ├── reminder.py
+    ├── flight_finder.py
+    ├── game_updater.py
+    └── desktop.py
 ```
 
 ---
 
 ## Troubleshooting
 
-**JARVIS opens but doesn't respond to voice**
-- Check your microphone is not muted (press F4)
-- Make sure `elevenlabs_api_key` is set in `config/api_keys.json`
+**Voice not working**
+- Check mic is not muted (F4)
+- Verify `elevenlabs_api_key` and `elevenlabs_voice_id` in config
 - Check Windows microphone permissions: Settings → Privacy → Microphone
+
+**JARVIS can't open an app**
+- Make sure the app is installed
+- Try the exact app name as it appears in Start Menu
+- Check console for `[open_app]` messages to see what was tried
 
 **"Module not found" error**
 ```bash
 pip install -r requirements.txt
 ```
 
-**JARVIS says she can't access real-time data**
-- This is fixed in the current version. JARVIS always uses live DuckDuckGo search.
-- If it persists, check your internet connection.
+**Double instances running / talking to each other**
+- The single-instance guard should prevent this
+- If it happens, kill all `python.exe` processes in Task Manager, then relaunch
 
-**Desktop shortcut doesn't work**
-- Re-run the PowerShell shortcut command from the [Desktop Shortcut](#desktop-shortcut) section above.
-- Make sure the Python path matches your installed version.
-- Verify `pythonw.exe` exists at the path shown.
-
-**Playwright/browser tools don't work**
-```bash
-python -m playwright install chromium
-```
+**Groq model errors**
+- Check your Groq API key at [console.groq.com](https://console.groq.com)
+- The model `meta-llama/llama-4-scout-17b-16e-instruct` must be available on your account
 
 ---
 
