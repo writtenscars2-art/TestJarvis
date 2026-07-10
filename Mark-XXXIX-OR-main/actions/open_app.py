@@ -1,296 +1,213 @@
-# actions/open_app.py
-# MARK XXV — Cross-Platform App Launcher
+"""
+open_app.py — JARVIS App Launcher (Windows)
 
-import time
-import subprocess
+Launch strategy (in order):
+1. Windows Store / UWP apps via AppUserModelId  (WhatsApp, Telegram, etc.)
+2. Known executable paths                        (Edge, Chrome, Office, etc.)
+3. shutil.which — apps in system PATH            (notepad, calc, code, etc.)
+4. HONEST FAILURE — no keyboard, no filesystem crawl, no side effects
+"""
+
+import json
 import platform
 import shutil
+import subprocess
+import time
+from pathlib import Path
 
-try:
-    import psutil
-    _PSUTIL = True
-except ImportError:
-    _PSUTIL = False
+_OS = platform.system()
 
-_APP_ALIASES = {
-    "whatsapp":           {"Windows": "WhatsApp",               "Darwin": "WhatsApp",            "Linux": "whatsapp"},
-    "chrome":             {"Windows": "chrome",                 "Darwin": "Google Chrome",       "Linux": "google-chrome"},
-    "google chrome":      {"Windows": "chrome",                 "Darwin": "Google Chrome",       "Linux": "google-chrome"},
-    "firefox":            {"Windows": "firefox",                "Darwin": "Firefox",             "Linux": "firefox"},
-    "spotify":            {"Windows": "Spotify",                "Darwin": "Spotify",             "Linux": "spotify"},
-    "vscode":             {"Windows": "code",                   "Darwin": "Visual Studio Code",  "Linux": "code"},
-    "visual studio code": {"Windows": "code",                   "Darwin": "Visual Studio Code",  "Linux": "code"},
-    "discord":            {"Windows": "Discord",                "Darwin": "Discord",             "Linux": "discord"},
-    "telegram":           {"Windows": "Telegram",               "Darwin": "Telegram",            "Linux": "telegram"},
-    "instagram":          {"Windows": "Instagram",              "Darwin": "Instagram",           "Linux": "instagram"},
-    "tiktok":             {"Windows": "TikTok",                 "Darwin": "TikTok",              "Linux": "tiktok"},
-    "notepad":            {"Windows": "notepad.exe",            "Darwin": "TextEdit",            "Linux": "gedit"},
-    "calculator":         {"Windows": "calc.exe",               "Darwin": "Calculator",          "Linux": "gnome-calculator"},
-    "terminal":           {"Windows": "cmd.exe",                "Darwin": "Terminal",            "Linux": "gnome-terminal"},
-    "cmd":                {"Windows": "cmd.exe",                "Darwin": "Terminal",            "Linux": "bash"},
-    "explorer":           {"Windows": "explorer.exe",           "Darwin": "Finder",              "Linux": "nautilus"},
-    "file explorer":      {"Windows": "explorer.exe",           "Darwin": "Finder",              "Linux": "nautilus"},
-    "paint":              {"Windows": "mspaint.exe",            "Darwin": "Preview",             "Linux": "gimp"},
-    "word":               {"Windows": "winword",                "Darwin": "Microsoft Word",      "Linux": "libreoffice --writer"},
-    "excel":              {"Windows": "excel",                  "Darwin": "Microsoft Excel",     "Linux": "libreoffice --calc"},
-    "powerpoint":         {"Windows": "powerpnt",               "Darwin": "Microsoft PowerPoint","Linux": "libreoffice --impress"},
-    "vlc":                {"Windows": "vlc",                    "Darwin": "VLC",                 "Linux": "vlc"},
-    "zoom":               {"Windows": "Zoom",                   "Darwin": "zoom.us",             "Linux": "zoom"},
-    "slack":              {"Windows": "Slack",                  "Darwin": "Slack",               "Linux": "slack"},
-    "steam":              {"Windows": "steam",                  "Darwin": "Steam",               "Linux": "steam"},
-    "task manager":       {"Windows": "taskmgr.exe",            "Darwin": "Activity Monitor",    "Linux": "gnome-system-monitor"},
-    "settings":           {"Windows": "ms-settings:",           "Darwin": "System Preferences",  "Linux": "gnome-control-center"},
-    "powershell":         {"Windows": "powershell.exe",         "Darwin": "Terminal",            "Linux": "bash"},
-    "edge":               {"Windows": "msedge",                 "Darwin": "Microsoft Edge",      "Linux": "microsoft-edge"},
-    "brave":              {"Windows": "brave",                  "Darwin": "Brave Browser",       "Linux": "brave-browser"},
-    "obsidian":           {"Windows": "Obsidian",               "Darwin": "Obsidian",            "Linux": "obsidian"},
-    "notion":             {"Windows": "Notion",                 "Darwin": "Notion",              "Linux": "notion"},
-    "blender":            {"Windows": "blender",                "Darwin": "Blender",             "Linux": "blender"},
-    "capcut":             {"Windows": "CapCut",                 "Darwin": "CapCut",              "Linux": "capcut"},
-    "postman":            {"Windows": "Postman",                "Darwin": "Postman",             "Linux": "postman"},
-    "figma":              {"Windows": "Figma",                  "Darwin": "Figma",               "Linux": "figma"},
+
+def _get_base_dir() -> Path:
+    import sys
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
+
+
+# ── Windows Store App IDs (AppUserModelId) ────────────────────────────────────
+# Launch via: explorer.exe shell:AppsFolder\{AUMID}
+_STORE_APPS: dict[str, str] = {
+    "whatsapp":         "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsAppDesktop",
+    "telegram":         "TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram",
+    "instagram":        "Facebook.Instagram_8xx8rvfyw5nnt!Instagram",
+    "tiktok":           "BytedancePte.Ltd.TikTok_6yccndn6064se!TikTok",
+    "netflix":          "4DF9E0F8.Netflix_mcm4njqhnhss8!Netflix",
+    "spotify":          "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+    "discord":          "Discord.Discord",
+    "teams":            "MSTeams_8wekyb3d8bbwe!MSTeams",
+    "microsoft teams":  "MSTeams_8wekyb3d8bbwe!MSTeams",
+    "xbox":             "Microsoft.XboxApp_8wekyb3d8bbwe!Microsoft.XboxApp",
+    "minecraft":        "Microsoft.MinecraftUWP_8wekyb3d8bbwe!App",
+    "skype":            "Microsoft.SkypeApp_kzf8qxf38zg5c!App",
+    "onenote":          "Microsoft.Office.OneNote_8wekyb3d8bbwe!microsoft.onenoteim",
+    "windows store":    "Microsoft.WindowsStore_8wekyb3d8bbwe!App",
+    "store":            "Microsoft.WindowsStore_8wekyb3d8bbwe!App",
+    "photos":           "Microsoft.Windows.Photos_8wekyb3d8bbwe!App",
+    "camera":           "Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+    "maps":             "Microsoft.WindowsMaps_8wekyb3d8bbwe!App",
+    "calendar":         "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.calendar",
+    "mail":             "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail",
+    "clock":            "Microsoft.WindowsAlarms_8wekyb3d8bbwe!App",
+    "alarms":           "Microsoft.WindowsAlarms_8wekyb3d8bbwe!App",
+    "solitaire":        "Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe!App",
+    "sticky notes":     "Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe!App",
+    "snip":             "Microsoft.ScreenSketch_8wekyb3d8bbwe!App",
+    "snipping tool":    "Microsoft.ScreenSketch_8wekyb3d8bbwe!App",
+    "paint 3d":         "Microsoft.MSPaint_8wekyb3d8bbwe!Microsoft.MSPaint",
+}
+
+# ── Known Windows executable paths ───────────────────────────────────────────
+# For apps that are installed but not in PATH
+_KNOWN_PATHS: dict[str, list[str]] = {
+    "edge":         [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"],
+    "msedge":       [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"],
+    "microsoft edge": [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"],
+    "chrome":       [r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"],
+    "google chrome": [r"C:\Program Files\Google\Chrome\Application\chrome.exe"],
+    "firefox":      [r"C:\Program Files\Mozilla Firefox\firefox.exe",
+                     r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"],
+    "brave":        [r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"],
+    "opera":        [str(Path.home() / "AppData/Local/Programs/Opera/launcher.exe")],
+    "opera gx":     [str(Path.home() / "AppData/Local/Programs/Opera GX/launcher.exe")],
+    "vlc":          [r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                     r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"],
+    "zoom":         [str(Path.home() / "AppData/Roaming/Zoom/bin/Zoom.exe")],
+    "slack":        [str(Path.home() / "AppData/Local/slack/slack.exe")],
+    "vscode":       [str(Path.home() / "AppData/Local/Programs/Microsoft VS Code/Code.exe")],
+    "visual studio code": [str(Path.home() / "AppData/Local/Programs/Microsoft VS Code/Code.exe")],
+    "vs code":      [str(Path.home() / "AppData/Local/Programs/Microsoft VS Code/Code.exe")],
+    "obsidian":     [str(Path.home() / "AppData/Local/Obsidian/Obsidian.exe")],
+    "notion":       [str(Path.home() / "AppData/Local/Programs/Notion/Notion.exe")],
+    "postman":      [str(Path.home() / "AppData/Local/Postman/Postman.exe")],
+    "figma":        [str(Path.home() / "AppData/Local/Figma/Figma.exe")],
+    "steam":        [r"C:\Program Files (x86)\Steam\steam.exe",
+                     r"C:\Program Files\Steam\steam.exe"],
+    "spotify desktop": [str(Path.home() / "AppData/Roaming/Spotify/Spotify.exe")],
+    "discord app":  [str(Path.home() / "AppData/Local/Discord/app-latest/Discord.exe"),
+                     str(Path.home() / "AppData/Roaming/Discord/Discord.exe")],
+    "word":         [r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+                     r"C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE"],
+    "excel":        [r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+                     r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE"],
+    "powerpoint":   [r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+                     r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE"],
+    "outlook":      [r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE",
+                     r"C:\Program Files (x86)\Microsoft Office\root\Office16\OUTLOOK.EXE"],
+    "capcut":       [str(Path.home() / "AppData/Local/Programs/CapCut/CapCut.exe")],
+    "blender":      [r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
+                     r"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe"],
+}
+
+# ── Apps directly in PATH (Windows built-ins + common installs) ──────────────
+_PATH_COMMANDS: dict[str, str] = {
+    "notepad":        "notepad.exe",
+    "calculator":     "calc.exe",
+    "calc":           "calc.exe",
+    "paint":          "mspaint.exe",
+    "mspaint":        "mspaint.exe",
+    "wordpad":        "wordpad.exe",
+    "cmd":            "cmd.exe",
+    "command prompt": "cmd.exe",
+    "powershell":     "powershell.exe",
+    "terminal":       "wt.exe",          # Windows Terminal
+    "windows terminal": "wt.exe",
+    "task manager":   "taskmgr.exe",
+    "taskmgr":        "taskmgr.exe",
+    "file explorer":  "explorer.exe",
+    "explorer":       "explorer.exe",
+    "control panel":  "control.exe",
+    "registry":       "regedit.exe",
+    "device manager": "devmgmt.msc",
+    "settings":       "ms-settings:",    # URI scheme
+    "magnifier":      "magnify.exe",
+    "on screen keyboard": "osk.exe",
+    "narrator":       "narrator.exe",
+    "character map":  "charmap.exe",
 }
 
 
-def _normalize(raw: str) -> str:
-    system = platform.system()
-    key    = raw.lower().strip()
-    if key in _APP_ALIASES:
-        return _APP_ALIASES[key].get(system, raw)
-    for alias_key, os_map in _APP_ALIASES.items():
-        if alias_key in key or key in alias_key:
-            return os_map.get(system, raw)
-    return raw
-
-
-def _is_running(app_name: str) -> bool:
-    if not _PSUTIL:
-        return True
-    app_lower = app_name.lower().replace(" ", "").replace(".exe", "")
+def _launch_store(app_key: str) -> bool:
+    """Launch a Windows Store app via AppUserModelId."""
+    aumid = _STORE_APPS.get(app_key)
+    if not aumid:
+        return False
     try:
-        for proc in psutil.process_iter(["name"]):
-            try:
-                proc_name = proc.info["name"].lower().replace(" ", "").replace(".exe", "")
-                if app_lower in proc_name or proc_name in app_lower:
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception:
-        pass
-    return False
-
-
-def _launch_windows(app_name: str) -> bool:
-    """
-    Launch on Windows with correct priority:
-    1. Windows Store apps (most modern apps: WhatsApp, Spotify, etc.)
-    2. Direct binary in PATH (classic apps: notepad, chrome, code, etc.)
-    3. Common executable paths (edge, office apps)
-    4. URI schemes (ms-settings:, etc.)
-    5. Start menu search (last resort)
-    """
-    import subprocess as _sp
-
-    _STORE_IDS = {
-        "whatsapp":    "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsAppDesktop",
-        "spotify":     "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
-        "calculator":  "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
-        "calendar":    "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.calendar",
-        "mail":        "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail",
-        "windows store": "Microsoft.WindowsStore_8wekyb3d8bbwe!App",
-        "store":       "Microsoft.WindowsStore_8wekyb3d8bbwe!App",
-        "photos":      "Microsoft.Windows.Photos_8wekyb3d8bbwe!App",
-        "camera":      "Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
-        "maps":        "Microsoft.WindowsMaps_8wekyb3d8bbwe!App",
-        "xbox":        "Microsoft.XboxApp_8wekyb3d8bbwe!Microsoft.XboxApp",
-        "teams":       "MSTeams_8wekyb3d8bbwe!MSTeams",
-        "telegram":    "TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram",
-        "instagram":   "Facebook.Instagram_8xx8rvfyw5nnt!Instagram",
-        "tiktok":      "BytedancePte.Ltd.TikTok_6yccndn6064se!TikTok",
-        "netflix":     "4DF9E0F8.Netflix_mcm4njqhnhss8!Netflix",
-        "discord":     "Discord.Discord",
-        "minecraft":   "Microsoft.MinecraftUWP_8wekyb3d8bbwe!App",
-        "skype":       "Microsoft.SkypeApp_kzf8qxf38zg5c!App",
-        "onenote":     "Microsoft.Office.OneNote_8wekyb3d8bbwe!microsoft.onenoteim",
-    }
-
-    # Hard-coded exe paths for apps not in PATH
-    _EXE_PATHS = {
-        "msedge": [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ],
-        "chrome": [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        ],
-        "microsoftedge": [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        ],
-    }
-
-    app_key = app_name.lower().strip().replace(".exe", "").replace(" ", "")
-
-    # ── Step 1: Windows Store apps ─────────────────────────────────────────
-    # Check both the raw key and the app_name.lower() for Store IDs
-    store_key = app_name.lower().strip()
-    aumid = _STORE_IDS.get(store_key) or _STORE_IDS.get(app_key)
-    if aumid:
-        try:
-            _sp.Popen(
-                ["explorer", f"shell:AppsFolder\\{aumid}"],
-                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL
-            )
-            time.sleep(2.0)
-            print(f"[open_app] ✅ Launched Store app: {aumid}")
-            return True
-        except Exception as e:
-            print(f"[open_app] Store launch failed: {e}")
-
-    # ── Step 2: Direct binary in PATH ─────────────────────────────────────
-    binary = shutil.which(app_name) or shutil.which(app_name.lower())
-    if binary:
-        try:
-            _sp.Popen([binary], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-            time.sleep(1.5)
-            print(f"[open_app] ✅ Launched from PATH: {binary}")
-            return True
-        except Exception as e:
-            print(f"[open_app] PATH launch failed: {e}")
-
-    # ── Step 3: Hard-coded exe paths ──────────────────────────────────────
-    from pathlib import Path as _P
-    for path_key, paths in _EXE_PATHS.items():
-        if path_key in app_key or app_key in path_key:
-            for exe_path in paths:
-                if _P(exe_path).exists():
-                    try:
-                        _sp.Popen([exe_path], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-                        time.sleep(1.5)
-                        print(f"[open_app] ✅ Launched from hard-coded path: {exe_path}")
-                        return True
-                    except Exception:
-                        pass
-
-    # ── Step 4: URI schemes (ms-settings:, shell:, etc.) ──────────────────
-    if ":" in app_name and not _P(app_name).exists():
-        try:
-            _sp.Popen(["cmd", "/c", "start", "", app_name],
-                      stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-            time.sleep(1.0)
-            print(f"[open_app] ✅ Launched URI: {app_name}")
-            return True
-        except Exception as e:
-            print(f"[open_app] URI launch failed: {e}")
-
-    # ── Step 5: Search common install locations ───────────────────────────
-    # Try common program directories before touching the keyboard
-    from pathlib import Path as _P
-    search_dirs = [
-        r"C:\Program Files",
-        r"C:\Program Files (x86)",
-        str(_P.home() / "AppData" / "Local"),
-        str(_P.home() / "AppData" / "Local" / "Programs"),
-        str(_P.home() / "AppData" / "Roaming"),
-    ]
-    app_lower = app_name.lower().replace(" ", "")
-    for search_dir in search_dirs:
-        search_path = _P(search_dir)
-        if not search_path.exists():
-            continue
-        try:
-            for exe in search_path.rglob(f"{app_name}.exe"):
-                try:
-                    _sp.Popen([str(exe)], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-                    time.sleep(1.5)
-                    print(f"[open_app] ✅ Found and launched: {exe}")
-                    return True
-                except Exception:
-                    pass
-            # Also try lowercase/no-space variant
-            for exe in search_path.rglob(f"*{app_lower}*.exe"):
-                if exe.name.lower().startswith(app_lower[:4]):
-                    try:
-                        _sp.Popen([str(exe)], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-                        time.sleep(1.5)
-                        print(f"[open_app] ✅ Found and launched: {exe}")
-                        return True
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-    # ── NO keyboard fallback — it causes random side effects ──────────────
-    print(f"[open_app] ❌ Could not find {app_name} — not launching via keyboard")
-    return False
-
-def _launch_macos(app_name: str) -> bool:
-    try:
-        result = subprocess.run(["open", "-a", app_name], capture_output=True, timeout=8)
-        if result.returncode == 0:
-            time.sleep(1.0)
-            return True
-    except Exception:
-        pass
-
-    try:
-        result = subprocess.run(["open", "-a", f"{app_name}.app"], capture_output=True, timeout=8)
-        if result.returncode == 0:
-            time.sleep(1.0)
-            return True
-    except Exception:
-        pass
-
-    try:
-        import pyautogui
-        pyautogui.hotkey("command", "space")
-        time.sleep(0.6)
-        pyautogui.write(app_name, interval=0.05)
-        time.sleep(0.8)
-        pyautogui.press("enter")
+        subprocess.Popen(
+            ["explorer.exe", f"shell:AppsFolder\\{aumid}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
         time.sleep(1.5)
+        print(f"[open_app] ✅ Store: {aumid}")
         return True
     except Exception as e:
-        print(f"[open_app] ⚠️ macOS Spotlight failed: {e}")
+        print(f"[open_app] Store launch failed: {e}")
         return False
 
 
-
-def _launch_linux(app_name: str) -> bool:
-    binary = (
-        shutil.which(app_name) or
-        shutil.which(app_name.lower()) or
-        shutil.which(app_name.lower().replace(" ", "-"))
-    )
-    if binary:
-        try:
-            subprocess.Popen([binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1.0)
-            return True
-        except Exception:
-            pass
-
+def _launch_path(exe: str) -> bool:
+    """Launch an exe by full path."""
+    p = Path(exe)
+    if not p.exists():
+        return False
     try:
-        subprocess.run(["xdg-open", app_name], capture_output=True, timeout=5)
+        subprocess.Popen(
+            [str(p)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+        time.sleep(1.5)
+        print(f"[open_app] ✅ Path: {p}")
         return True
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[open_app] Path launch failed ({p}): {e}")
+        return False
 
+
+def _launch_uri(uri: str) -> bool:
+    """Launch a URI scheme (ms-settings:, etc.)."""
     try:
-        desktop_name = app_name.lower().replace(" ", "-")
-        subprocess.run(["gtk-launch", desktop_name], capture_output=True, timeout=5)
+        subprocess.Popen(
+            ["cmd.exe", "/c", "start", "", uri],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+        time.sleep(1.0)
+        print(f"[open_app] ✅ URI: {uri}")
         return True
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[open_app] URI launch failed: {e}")
+        return False
 
-    return False
 
-
-_OS_LAUNCHERS = {
-    "Windows": _launch_windows,
-    "Darwin":  _launch_macos,
-    "Linux":   _launch_linux,
-}
+def _launch_which(cmd: str) -> bool:
+    """Launch a command that's in the system PATH."""
+    binary = shutil.which(cmd)
+    if not binary:
+        return False
+    # Special case: URI schemes handled differently
+    if ":" in cmd and not Path(cmd).exists():
+        return _launch_uri(cmd)
+    try:
+        subprocess.Popen(
+            [binary],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+        time.sleep(1.2)
+        print(f"[open_app] ✅ PATH: {binary}")
+        return True
+    except Exception as e:
+        print(f"[open_app] PATH launch failed ({binary}): {e}")
+        return False
 
 
 def open_app(
@@ -299,45 +216,68 @@ def open_app(
     player=None,
     session_memory=None,
 ) -> str:
+    """
+    Open any application on Windows.
+    Tries Store apps → known paths → PATH → honest failure.
+    NO keyboard shortcuts. NO filesystem crawling. NO side effects.
+    """
     app_name = (parameters or {}).get("app_name", "").strip()
-
     if not app_name:
-        return "Please specify which application to open, sir."
+        return "Please tell me which app to open, boss."
 
-    system   = platform.system()
-    launcher = _OS_LAUNCHERS.get(system)
+    if _OS != "Windows":
+        # macOS / Linux fallback
+        try:
+            if _OS == "Darwin":
+                r = subprocess.run(["open", "-a", app_name], capture_output=True, timeout=8)
+                if r.returncode == 0:
+                    return f"Opened {app_name}, boss."
+            else:
+                binary = shutil.which(app_name.lower()) or shutil.which(app_name.lower().replace(" ", "-"))
+                if binary:
+                    subprocess.Popen([binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return f"Opened {app_name}, boss."
+        except Exception as e:
+            return f"Could not open {app_name}, boss: {e}"
+        return f"Could not find {app_name}, boss."
 
-    if launcher is None:
-        return f"Unsupported OS: {system}"
-
-    normalized = _normalize(app_name)
-    print(f"[open_app] 🚀 Launching: {app_name} → {normalized} ({system})")
-
+    key = app_name.lower().strip()
+    print(f"[open_app] Requested: {app_name!r} (key={key!r})")
     if player:
         player.write_log(f"[open_app] {app_name}")
 
-    try:
-        success = launcher(normalized)
+    # ── 1. Windows Store apps ─────────────────────────────────────────────
+    if _launch_store(key):
+        return f"Opened {app_name}, boss."
 
-        if success is True:
-            return f"Opened {app_name}, boss."
+    # ── 2. Known executable paths ─────────────────────────────────────────
+    # Check exact key match first
+    for path_key, paths in _KNOWN_PATHS.items():
+        if path_key == key or key in path_key or path_key in key:
+            for exe in paths:
+                if _launch_path(exe):
+                    return f"Opened {app_name}, boss."
 
-        if success is None:
-            return f"I launched {app_name}, boss. It should be open shortly."
-
-        # False — try original name if different from normalized
-        if normalized.lower() != app_name.lower():
-            success2 = launcher(app_name)
-            if success2 is True:
+    # ── 3. PATH commands (built-ins and well-known apps) ──────────────────
+    # Check exact key match
+    if key in _PATH_COMMANDS:
+        cmd = _PATH_COMMANDS[key]
+        if ":" in cmd:   # URI scheme
+            if _launch_uri(cmd):
                 return f"Opened {app_name}, boss."
-            if success2 is None:
-                return f"I launched {app_name}, boss. It should be open shortly."
+        else:
+            if _launch_which(cmd):
+                return f"Opened {app_name}, boss."
 
-        return (
-            f"I could not find {app_name} on your device, boss. "
-            f"Make sure it is installed, or try saying the exact app name."
-        )
+    # Try the app_name directly as a command
+    if _launch_which(app_name):
+        return f"Opened {app_name}, boss."
+    if _launch_which(app_name + ".exe"):
+        return f"Opened {app_name}, boss."
 
-    except Exception as e:
-        print(f"[open_app] ❌ {e}")
-        return f"Failed to open {app_name}, boss: {e}"
+    # ── 4. Honest failure — no side effects ───────────────────────────────
+    print(f"[open_app] ❌ Could not find: {app_name}")
+    return (
+        f"I could not find {app_name} on your device, boss. "
+        f"It may not be installed, or try a different name."
+    )
