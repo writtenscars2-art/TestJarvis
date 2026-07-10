@@ -103,7 +103,7 @@ dev_agent     youtube_video      flight_finder
 git clone https://github.com/writtenscars2-art/Mark-XXXIX-OR-main--1-.git
 cd Mark-XXXIX-OR-main--1-
 
-cd Mark-XXXIX
+cd Mark-XXXIX-OR-main
 ```
 
 Or download and extract the ZIP, then open a terminal in the project folder.
