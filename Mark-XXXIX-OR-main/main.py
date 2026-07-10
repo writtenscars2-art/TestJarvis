@@ -931,15 +931,24 @@ class JarvisLive:
                     _handled = True
 
                 # World Monitor (yes to startup briefing) — open in default browser
-                elif _world_monitor_asked and ut_lower in (
-                    "yes", "yes please", "go ahead", "sure", "open it",
-                    "yes go ahead", "open world monitor", "yes open it",
-                    "yeah", "yep", "ok", "okay", "do it", "open that",
-                    "yes do it", "open the world monitor", "pull it up",
+                # Use substring matching — Scribe may add punctuation/extra words to "yes"
+                elif _world_monitor_asked and (
+                    ut_lower in ("yes", "yes please", "go ahead", "sure", "open it",
+                                 "yes go ahead", "open world monitor", "yes open it",
+                                 "yeah", "yep", "ok", "okay", "do it", "open that",
+                                 "yes do it", "open the world monitor", "pull it up")
+                    or ut_lower.startswith("yes")
+                    or ut_lower.startswith("yeah")
+                    or ut_lower.startswith("sure")
+                    or ut_lower.startswith("go ahead")
+                    or ut_lower.startswith("ok")
+                    or "world monitor" in ut_lower
+                    or "pull it up" in ut_lower
+                    or "open it" in ut_lower
                 ):
-                    # Open worldmonitor.app dashboard directly
                     _wm_url = "https://www.worldmonitor.app/dashboard"
                     _opened = False
+                    print(f"[JARVIS] World Monitor triggered by: {ut_lower!r}")
                     try:
                         import subprocess as _sp, json as _j
                         _cfg2 = _j.load(open(API_CONFIG_PATH, encoding="utf-8"))
@@ -974,16 +983,14 @@ class JarvisLive:
                     _handled = True
 
                 if _handled:
-                    _startup_injected = True   # mark startup done once user has interacted
+                    _startup_injected = True
                     if not _world_monitor_asked:
                         pass  # already reset above
-                    elif ut_lower not in (
-                        "yes", "yes please", "go ahead", "sure", "open it",
-                        "yes go ahead", "open world monitor", "yes open it",
-                        "yeah", "yep", "ok", "okay", "do it", "open that",
-                        "yes do it", "open the world monitor", "pull it up",
+                    elif not (
+                        ut_lower.startswith("yes") or ut_lower.startswith("yeah")
+                        or ut_lower.startswith("sure") or ut_lower.startswith("ok")
+                        or ut_lower.startswith("go ahead") or "world monitor" in ut_lower
                     ):
-                        # User said something other than yes — briefing question is no longer pending
                         _world_monitor_asked = False
                     continue
                 # ── END LOCAL INTENT OVERRIDE ──────────────────────────────
@@ -996,11 +1003,11 @@ class JarvisLive:
                     _startup_injected = True
 
                 # Reset World Monitor flag when any non-yes command goes to LLM
-                if _world_monitor_asked and ut_lower not in (
-                    "yes", "yes please", "go ahead", "sure", "open it",
-                    "yes go ahead", "open world monitor", "yes open it",
-                    "yeah", "yep", "ok", "okay", "do it", "open that",
-                    "yes do it", "open the world monitor", "pull it up",
+                if _world_monitor_asked and not (
+                    ut_lower.startswith("yes") or ut_lower.startswith("yeah")
+                    or ut_lower.startswith("sure") or ut_lower.startswith("ok")
+                    or ut_lower.startswith("go ahead") or "world monitor" in ut_lower
+                    or "pull it up" in ut_lower or "open it" in ut_lower
                 ):
                     _world_monitor_asked = False
 
