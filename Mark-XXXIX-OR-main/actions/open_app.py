@@ -183,22 +183,45 @@ def _launch_windows(app_name: str) -> bool:
         except Exception as e:
             print(f"[open_app] URI launch failed: {e}")
 
-    # ── Step 5: Start menu search (last resort) ───────────────────────────
-    try:
-        import pyautogui, pyperclip
-        pyautogui.PAUSE = 0.1
-        pyautogui.press("win")
-        time.sleep(0.8)
-        pyperclip.copy(app_name)
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(1.0)
-        pyautogui.press("enter")
-        time.sleep(2.5)
-        print(f"[open_app] ⚠️ Launched via Start menu (unverified): {app_name}")
-        return None   # uncertain — can't verify
-    except Exception as e:
-        print(f"[open_app] Start menu failed: {e}")
+    # ── Step 5: Search common install locations ───────────────────────────
+    # Try common program directories before touching the keyboard
+    from pathlib import Path as _P
+    search_dirs = [
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+        str(_P.home() / "AppData" / "Local"),
+        str(_P.home() / "AppData" / "Local" / "Programs"),
+        str(_P.home() / "AppData" / "Roaming"),
+    ]
+    app_lower = app_name.lower().replace(" ", "")
+    for search_dir in search_dirs:
+        search_path = _P(search_dir)
+        if not search_path.exists():
+            continue
+        try:
+            for exe in search_path.rglob(f"{app_name}.exe"):
+                try:
+                    _sp.Popen([str(exe)], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                    time.sleep(1.5)
+                    print(f"[open_app] ✅ Found and launched: {exe}")
+                    return True
+                except Exception:
+                    pass
+            # Also try lowercase/no-space variant
+            for exe in search_path.rglob(f"*{app_lower}*.exe"):
+                if exe.name.lower().startswith(app_lower[:4]):
+                    try:
+                        _sp.Popen([str(exe)], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                        time.sleep(1.5)
+                        print(f"[open_app] ✅ Found and launched: {exe}")
+                        return True
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
+    # ── NO keyboard fallback — it causes random side effects ──────────────
+    print(f"[open_app] ❌ Could not find {app_name} — not launching via keyboard")
     return False
 
 def _launch_macos(app_name: str) -> bool:
@@ -300,20 +323,19 @@ def open_app(
             return f"Opened {app_name}, boss."
 
         if success is None:
-            # Uncertain — Start menu was used, can't fully confirm
-            return f"I launched {app_name} via Start menu, boss. It should be open."
+            return f"I launched {app_name}, boss. It should be open shortly."
 
-        # success is False — try original name
-        if normalized != app_name:
+        # False — try original name if different from normalized
+        if normalized.lower() != app_name.lower():
             success2 = launcher(app_name)
             if success2 is True:
                 return f"Opened {app_name}, boss."
             if success2 is None:
-                return f"I launched {app_name} via Start menu, boss. It should be open."
+                return f"I launched {app_name}, boss. It should be open shortly."
 
         return (
-            f"I could not open {app_name}, boss. "
-            f"It may not be installed or the name may be different."
+            f"I could not find {app_name} on your device, boss. "
+            f"Make sure it is installed, or try saying the exact app name."
         )
 
     except Exception as e:
