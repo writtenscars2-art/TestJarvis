@@ -34,7 +34,7 @@ NVIDIA_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
 
 IMG_MAX_W = 1280   # higher res for better finger detection
 IMG_MAX_H = 720
-JPEG_Q    = 75     # better quality — was 55 which could produce artifacts
+JPEG_Q    = 75     # better quality -- was 55 which could produce artifacts
 
 SYSTEM_PROMPT = (
     "You are JARVIS from Iron Man movies. "

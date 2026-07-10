@@ -24,12 +24,19 @@ def _search_and_launch_powershell(app_name: str) -> bool:
     """
     Use PowerShell Get-StartApps to find any installed app by name,
     then launch it. This searches the same database as the Windows Start menu
-    — covers every Win32, Store, and UWP app installed on the device.
+    -- covers every Win32, Store, and UWP app installed on the device.
     """
+    import re as _re
+    # Sanitize app_name -- only allow alphanumeric, space, hyphen, dot to prevent injection
+    safe_name = _re.sub(r"[^a-zA-Z0-9 \-_\.]", "", app_name).strip()
+    if not safe_name:
+        print(f"[open_app] app_name sanitized to empty, skipping PS search")
+        return False
+
     try:
-        # Query Get-StartApps for matching apps
+        # Query Get-StartApps using safe name
         ps_script = f"""
-$apps = Get-StartApps | Where-Object {{ $_.Name -like '*{app_name}*' }}
+$apps = Get-StartApps | Where-Object {{ $_.Name -like '*{safe_name}*' }}
 if ($apps) {{
     $app = $apps | Select-Object -First 1
     Write-Output $app.AppID
@@ -59,13 +66,16 @@ if ($apps) {{
 
             # If Start-Process fails (some apps), try Invoke-Item
             invoke_script = f'Invoke-Item "shell:AppsFolder\\{app_id}"'
-            subprocess.run(
+            invoke_result = subprocess.run(
                 ["powershell", "-WindowStyle", "Hidden", "-Command", invoke_script],
                 capture_output=True, text=True, timeout=8
             )
-            time.sleep(2.0)
-            print(f"[open_app] ✅ Launched via Invoke-Item: {app_found}")
-            return True
+            if invoke_result.returncode == 0:
+                time.sleep(2.0)
+                print(f"[open_app] Launched via Invoke-Item: {app_found}")
+                return True
+            print(f"[open_app] Both launch methods failed for {app_found}")
+            return False
 
     except subprocess.TimeoutExpired:
         print("[open_app] Get-StartApps timed out")

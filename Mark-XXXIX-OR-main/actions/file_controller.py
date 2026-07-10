@@ -1,10 +1,11 @@
 # actions/file_controller.py
-# File management — create, delete, move, rename, list, find, organize
+# File management -- create, delete, move, rename, list, find, organize
 
+import os
 import shutil
+import subprocess
 from pathlib import Path
 from datetime import datetime
-import send2trash
 
 def _get_desktop() -> Path:
     """Returns desktop path — works on Windows, Mac, Linux."""
@@ -98,18 +99,21 @@ def create_folder(path: str) -> str:
 def delete_file(path: str, confirm: bool = True) -> str:
     """
     Deletes a file or folder.
-    Moves to Recycle Bin on Windows if possible, otherwise permanent delete.
+    Moves to Recycle Bin/Trash if send2trash is available, otherwise permanent delete.
     """
     try:
         target = Path(path).expanduser()
         if not target.exists():
             return f"Not found: {path}"
 
+        # Try Recycle Bin first (safe)
         try:
-
+            import send2trash
             send2trash.send2trash(str(target))
             return f"Moved to Recycle Bin: {target.name}"
         except ImportError:
+            pass
+        except Exception:
             pass
 
         # Fallback: permanent delete
@@ -224,23 +228,28 @@ def write_file(path: str, content: str, append: bool = False) -> str:
 def find_files(name: str = "", extension: str = "", path: str = "home",
                max_results: int = 20) -> str:
     """
-    Searches for files by name or extension.
+    Searches for files by name or extension with a time limit.
     Example: find_files(extension=".pdf", path="documents")
     """
+    import time
     try:
         search_path = _resolve_path(path)
         if not search_path.exists():
             return f"Search path not found: {path}"
 
-        results = []
-        pattern = f"*{extension}" if extension else "*"
+        results  = []
+        pattern  = f"*{extension}" if extension else "*"
+        deadline = time.time() + 10.0   # 10 second max search time
 
         for item in search_path.rglob(pattern):
+            if time.time() > deadline:
+                results.append(f"... (search stopped after 10s, showing {len(results)} results)")
+                break
             if item.is_file():
                 if name and name.lower() not in item.name.lower():
                     continue
                 size = _format_size(item.stat().st_size)
-                results.append(f"📄 {item.name} ({size}) — {item.parent}")
+                results.append(f"  {item.name} ({size}) -- {item.parent}")
                 if len(results) >= max_results:
                     break
 
@@ -470,8 +479,23 @@ def file_controller(
             full = _full_path(path, name)
             result = get_file_info(full)
 
+        elif action in ("open", "open_folder", "open_file"):
+            # Open file/folder in system default application
+            full = _full_path(path, name)
+            try:
+                import platform as _pl
+                if _pl.system() == "Windows":
+                    os.startfile(full)
+                elif _pl.system() == "Darwin":
+                    subprocess.Popen(["open", full])
+                else:
+                    subprocess.Popen(["xdg-open", full])
+                result = f"Opened: {Path(full).name}"
+            except Exception as e:
+                result = f"Could not open: {e}"
+
         else:
-            result = f"Unknown action: '{action}'"
+            result = f"Unknown action: '{action}'. Available: list, read, write, create_file, create_folder, delete, move, copy, rename, find, info, disk_usage, open, organize_desktop"
 
     except Exception as e:
         result = f"File controller error: {e}"
