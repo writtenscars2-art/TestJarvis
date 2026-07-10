@@ -423,6 +423,132 @@ def _force_kill(app: str) -> str:
     except Exception:
         pass
     return f"Could not find process: {app}"
+
+
+def _do_in_app(app_title: str, action: str, target: str = "", text: str = "") -> str:
+    """
+    Focus an app then perform an action inside it.
+    Supports: search, click, type, scroll, hotkey, read
+    """
+    if not _PYAUTOGUI:
+        return "pyautogui not available."
+
+    # 1. Focus the app window first
+    if app_title:
+        focus_result = _focus_window(app_title)
+        time.sleep(0.6)  # wait for window to come to front
+
+    action = action.lower().strip()
+
+    # 2. Perform the action
+    if action in ("search", "find"):
+        # Open search in the app (Ctrl+F for most apps)
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.4)
+        if _PYPERCLIP and text:
+            pyperclip.copy(text)
+            pyautogui.hotkey("ctrl", "v")
+        elif text:
+            pyautogui.write(text, interval=0.03)
+        time.sleep(0.3)
+        return f"Searched for '{text}' in {app_title or 'app'}."
+
+    if action in ("type", "write", "input"):
+        if _PYPERCLIP and text:
+            pyperclip.copy(text)
+            pyautogui.hotkey("ctrl", "v")
+        elif text:
+            pyautogui.write(text, interval=0.03)
+        return f"Typed '{text[:50]}' in {app_title or 'app'}."
+
+    if action == "click":
+        if target:
+            # Try to find the element on screen using image search or text
+            coords = _screen_find(target)
+            if coords:
+                pyautogui.click(coords[0], coords[1])
+                time.sleep(0.3)
+                return f"Clicked '{target}' in {app_title or 'app'}."
+            return f"Could not find '{target}' on screen."
+        return "No click target specified."
+
+    if action in ("scroll_down", "scroll"):
+        pyautogui.scroll(-5)
+        return f"Scrolled down in {app_title or 'app'}."
+
+    if action == "scroll_up":
+        pyautogui.scroll(5)
+        return f"Scrolled up in {app_title or 'app'}."
+
+    if action in ("hotkey", "shortcut"):
+        if text:
+            keys = [k.strip() for k in text.split("+")]
+            pyautogui.hotkey(*keys)
+            return f"Pressed {text} in {app_title or 'app'}."
+        return "No hotkey specified."
+
+    if action in ("select_all", "selectall"):
+        pyautogui.hotkey("ctrl", "a")
+        return f"Selected all in {app_title or 'app'}."
+
+    if action in ("copy", "copy_text"):
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.2)
+        pyautogui.hotkey("ctrl", "c")
+        time.sleep(0.3)
+        if _PYPERCLIP:
+            return pyperclip.paste()
+        return "Copied to clipboard."
+
+    if action in ("save", "save_file"):
+        pyautogui.hotkey("ctrl", "s")
+        return f"Saved in {app_title or 'app'}."
+
+    if action in ("undo",):
+        pyautogui.hotkey("ctrl", "z")
+        return f"Undone in {app_title or 'app'}."
+
+    if action in ("redo",):
+        pyautogui.hotkey("ctrl", "y")
+        return f"Redone in {app_title or 'app'}."
+
+    if action in ("new", "new_file", "new_tab"):
+        pyautogui.hotkey("ctrl", "n")
+        return f"Opened new in {app_title or 'app'}."
+
+    if action in ("close_tab",):
+        pyautogui.hotkey("ctrl", "w")
+        return f"Closed tab in {app_title or 'app'}."
+
+    if action in ("refresh", "reload"):
+        pyautogui.press("f5")
+        return f"Refreshed {app_title or 'app'}."
+
+    if action in ("zoom_in",):
+        pyautogui.hotkey("ctrl", "equal")
+        return f"Zoomed in {app_title or 'app'}."
+
+    if action in ("zoom_out",):
+        pyautogui.hotkey("ctrl", "minus")
+        return f"Zoomed out {app_title or 'app'}."
+
+    if action in ("go_back", "back"):
+        pyautogui.hotkey("alt", "left")
+        return f"Went back in {app_title or 'app'}."
+
+    if action in ("go_forward", "forward"):
+        pyautogui.hotkey("alt", "right")
+        return f"Went forward in {app_title or 'app'}."
+
+    if action in ("enter", "press_enter"):
+        pyautogui.press("enter")
+        return f"Pressed Enter in {app_title or 'app'}."
+
+    if action in ("escape", "cancel"):
+        pyautogui.press("escape")
+        return f"Pressed Escape in {app_title or 'app'}."
+
+    return f"Unknown in-app action: '{action}'"
 def _screen_find(description: str) -> tuple[int, int] | None:
     try:
         import base64
@@ -615,6 +741,15 @@ def computer_control(
         if action in ("force_close", "force_kill"):
             app = params.get("app", "") or params.get("title", "")
             return _force_kill(app)
+
+        # ── DO ACTION INSIDE AN APP ────────────────────────────────────────
+        if action in ("do_in_app", "app_action", "in_app"):
+            return _do_in_app(
+                app_title=params.get("app", "") or params.get("title", ""),
+                action=params.get("app_action", "") or params.get("description", ""),
+                target=params.get("target", ""),
+                text=params.get("text", ""),
+            )
 
         if action == "random_data":
             dt     = params.get("type", "name")

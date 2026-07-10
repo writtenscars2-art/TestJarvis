@@ -660,14 +660,9 @@ class JarvisLive:
                         if tc.id and not state["tc"][idx]["id"]:
                             state["tc"][idx]["id"] = tc.id
                 if delta.content:
+                    # Just accumulate — speak full response at end for minimum latency
                     state["buf"]  += delta.content
                     state["text"] += delta.content
-                    sentences = re.split(r"(?<=[.!?])\s+", state["buf"])
-                    if len(sentences) > 1:
-                        to_speak = " ".join(sentences[:-1]).strip()
-                        if to_speak:
-                            self.speak(to_speak)
-                        state["buf"] = sentences[-1]
 
             # Groq extra kwargs for better tool calling reliability
             groq_extra = {}
@@ -696,11 +691,8 @@ class JarvisLive:
                         msg = choice.message
                         if msg.content:
                             state["text"] = msg.content
-                            # Speak sentence by sentence
-                            sentences = re.split(r"(?<=[.!?])\s+", msg.content.strip())
-                            for s in sentences:
-                                if s.strip():
-                                    self.speak(s.strip())
+                            # Speak full response in ONE call — no per-sentence delay
+                            self.speak(msg.content.strip())
                         if msg.tool_calls:
                             for i, tc in enumerate(msg.tool_calls):
                                 state["tc"][i] = {
@@ -785,8 +777,10 @@ class JarvisLive:
                     else:
                         raise
 
-            if state["buf"].strip():
-                self.speak(state["buf"].strip())
+            # Speak the full accumulated response in one call (minimum latency)
+            full_response = state["text"].strip()
+            if full_response:
+                self.speak(full_response)
 
             tc_list = [state["tc"][i] for i in sorted(state["tc"]) if state["tc"][i]["name"]]
             return state["text"].strip(), tc_list
