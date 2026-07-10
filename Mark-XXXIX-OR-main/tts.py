@@ -65,6 +65,7 @@ class ElevenLabsTTS:
         self._q: queue.Queue          = queue.Queue()
         self._el_available            = bool(self._api_key and self._voice_id)
         self._quota_exceeded          = False   # set True on quota error
+        self._quota_retry_at          = 0.0     # timestamp when to retry ElevenLabs
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
 
@@ -92,6 +93,12 @@ class ElevenLabsTTS:
     def _play(self, text: str):
         self._set_speaking(True)
         try:
+            import time as _t
+            # If quota was exceeded, retry ElevenLabs after 5 minutes
+            if self._quota_exceeded and _t.time() > self._quota_retry_at:
+                self._quota_exceeded = False
+                print("[TTS] Retrying ElevenLabs after cooldown...")
+
             # Use ElevenLabs if available and quota not exceeded
             if self._el_available and not self._quota_exceeded:
                 try:
@@ -101,7 +108,8 @@ class ElevenLabsTTS:
                     err = str(e).lower()
                     if "quota_exceeded" in err or "quota exceeded" in err or "0 credits" in err:
                         self._quota_exceeded = True
-                        print("[TTS] ElevenLabs quota exhausted — switching to SAPI")
+                        self._quota_retry_at = _t.time() + 300  # retry in 5 minutes
+                        print("[TTS] ElevenLabs quota exhausted — switching to SAPI (retry in 5 min)")
                     else:
                         print(f"[TTS] ElevenLabs error: {str(e)[:120]}")
 

@@ -930,49 +930,46 @@ class JarvisLive:
                     await self._execute_tool("shutdown_jarvis", {})
                     _handled = True
 
-                # World Monitor (yes to startup briefing) — use go_to not open
-                elif _world_monitor_asked and ut_lower in ("yes", "yes please", "go ahead", "sure", "open it", "yes go ahead", "open world monitor", "yes open it"):
-                    # Open directly in default browser — bypass Playwright entirely
-                    import subprocess as _sp
-                    import json as _js
-                    _cfg = _js.load(open(API_CONFIG_PATH, encoding="utf-8"))
-                    _browser = _cfg.get("default_browser", "msedge").strip().lower()
-                    _urls = [
-                        "https://www.worldmonitor.app/",
-                        "https://www.worldmonitor.app/dashboard",
-                    ]
-                    # Map config name to executable
-                    _exe_map = {
-                        "msedge":  "msedge",
-                        "edge":    "msedge",
-                        "chrome":  "chrome",
-                        "firefox": "firefox",
-                        "brave":   "brave",
-                    }
-                    _exe = _exe_map.get(_browser, "msedge")
+                # World Monitor (yes to startup briefing) — open in default browser
+                elif _world_monitor_asked and ut_lower in (
+                    "yes", "yes please", "go ahead", "sure", "open it",
+                    "yes go ahead", "open world monitor", "yes open it",
+                    "yeah", "yep", "ok", "okay", "do it", "open that",
+                    "yes do it", "open the world monitor", "pull it up",
+                ):
+                    # Open worldmonitor.app dashboard directly
+                    _wm_url = "https://www.worldmonitor.app/dashboard"
                     _opened = False
-                    for _url in _urls:
+                    try:
+                        import subprocess as _sp, json as _j
+                        _cfg2 = _j.load(open(API_CONFIG_PATH, encoding="utf-8"))
+                        _browser2 = _cfg2.get("default_browser", "msedge").strip().lower()
+                        _exe2 = {"msedge": "msedge", "edge": "msedge",
+                                 "chrome": "chrome", "firefox": "firefox"}.get(_browser2, "msedge")
                         try:
-                            _sp.Popen([_exe, _url],
-                                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                            _sp.Popen([_exe2, _wm_url], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
                             _opened = True
+                            print(f"[JARVIS] World Monitor opened with {_exe2}")
                         except FileNotFoundError:
-                            # Executable not in PATH — try full Edge path
-                            _edge_paths = [
+                            for _ep in [
                                 r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
                                 r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                            ]
-                            for _ep in _edge_paths:
+                            ]:
                                 if Path(_ep).exists():
-                                    _sp.Popen([_ep, _url],
-                                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                                    _sp.Popen([_ep, _wm_url], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
                                     _opened = True
+                                    print(f"[JARVIS] World Monitor opened with {_ep}")
                                     break
-                            if not _opened:
-                                import webbrowser
-                                webbrowser.open(_url)
-                                _opened = True
-                    self.speak("Opening World Monitor now, boss." if _opened else "Could not open World Monitor, boss.")
+                        if not _opened:
+                            import webbrowser
+                            webbrowser.open(_wm_url)
+                            _opened = True
+                            print("[JARVIS] World Monitor opened with webbrowser")
+                    except Exception as _e:
+                        print(f"[JARVIS] World Monitor open error: {_e}")
+
+                    self.speak("Opening World Monitor now, boss." if _opened
+                               else "I could not open World Monitor, boss.")
                     _world_monitor_asked = False
                     _handled = True
 
@@ -980,8 +977,13 @@ class JarvisLive:
                     _startup_injected = True   # mark startup done once user has interacted
                     if not _world_monitor_asked:
                         pass  # already reset above
-                    elif ut_lower not in ("yes", "yes please", "go ahead", "sure", "open it", "yes go ahead", "open world monitor", "yes open it"):
-                        # User said something else — briefing question is no longer relevant
+                    elif ut_lower not in (
+                        "yes", "yes please", "go ahead", "sure", "open it",
+                        "yes go ahead", "open world monitor", "yes open it",
+                        "yeah", "yep", "ok", "okay", "do it", "open that",
+                        "yes do it", "open the world monitor", "pull it up",
+                    ):
+                        # User said something other than yes — briefing question is no longer pending
                         _world_monitor_asked = False
                     continue
                 # ── END LOCAL INTENT OVERRIDE ──────────────────────────────
@@ -996,7 +998,9 @@ class JarvisLive:
                 # Reset World Monitor flag when any non-yes command goes to LLM
                 if _world_monitor_asked and ut_lower not in (
                     "yes", "yes please", "go ahead", "sure", "open it",
-                    "yes go ahead", "open world monitor", "yes open it"
+                    "yes go ahead", "open world monitor", "yes open it",
+                    "yeah", "yep", "ok", "okay", "do it", "open that",
+                    "yes do it", "open the world monitor", "pull it up",
                 ):
                     _world_monitor_asked = False
 
