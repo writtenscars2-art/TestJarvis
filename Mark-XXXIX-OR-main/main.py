@@ -1134,38 +1134,6 @@ class JarvisLive:
 
                         self.ui.set_state("THINKING")
 
-                        # Tools that don't need a second LLM summarization call
-                        # Their tool result IS the response — speak it directly and break
-                        # Exception: computer_settings with device_info/system_info still needs LLM
-                        _SELF_EXPLAINING_TOOLS = {
-                            "open_app", "browser_control",
-                            "reminder", "send_message", "desktop_control",
-                            "game_updater", "computer_control",
-                        }
-                        # computer_settings is self-explaining UNLESS it's a data-query action
-                        _DATA_QUERY_ACTIONS = {
-                            "device_info", "get_device_info", "system_info", "pc_info",
-                            "computer_info", "get_volume", "volume_level", "current_volume",
-                            "get_brightness", "brightness_level", "battery", "battery_level",
-                            "wifi_status", "get_wifi",
-                        }
-                        for tc_obj in tc_objects:
-                            tc_action = ""
-                            try:
-                                tc_args = json.loads(tc_obj["function"]["arguments"] or "{}")
-                                tc_action = tc_args.get("action", "").lower()
-                            except Exception:
-                                pass
-                            if tc_obj["function"]["name"] == "computer_settings" and tc_action not in _DATA_QUERY_ACTIONS:
-                                _SELF_EXPLAINING_TOOLS.add("computer_settings")
-                            elif "computer_settings" in _SELF_EXPLAINING_TOOLS and tc_action in _DATA_QUERY_ACTIONS:
-                                _SELF_EXPLAINING_TOOLS.discard("computer_settings")
-
-                        all_self_explaining = all(
-                            tc_obj["function"]["name"] in _SELF_EXPLAINING_TOOLS
-                            for tc_obj in tc_objects
-                        )
-
                         for tc_obj in tc_objects:
                             try:
                                 tool_input = json.loads(tc_obj["function"]["arguments"] or "{}")
@@ -1174,24 +1142,11 @@ class JarvisLive:
                             tool_result = await self._execute_tool(
                                 tc_obj["function"]["name"], tool_input
                             )
-                            tool_result_str = tool_result.get("result", "") if isinstance(tool_result, dict) else str(tool_result or "")
                             conversation.append({
                                 "role":         "tool",
                                 "tool_call_id": tc_obj["id"],
                                 "content":      json.dumps(tool_result),
                             })
-                            # For self-explaining tools, speak result directly
-                            if all_self_explaining and tool_result_str and "Done." not in tool_result_str:
-                                full_out_log.append(tool_result_str)
-
-                        if all_self_explaining:
-                            # Speak tool result directly — no second LLM call needed
-                            spoken = " ".join(full_out_log).strip()
-                            if spoken:
-                                self.speak(spoken)
-                                full_out_log = []
-                                conversation.append({"role": "assistant", "content": spoken})
-                            break   # skip second LLM call
 
                     full_out = " ".join(full_out_log).strip()
                     if full_out:
