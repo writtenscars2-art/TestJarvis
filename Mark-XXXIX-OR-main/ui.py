@@ -1043,6 +1043,8 @@ class MainWindow(QMainWindow):
             self.windowFlags()
             | Qt.WindowType.WindowStaysOnTopHint
         )
+        # Save the initial full-mode flags so we can restore them exactly after compact mode
+        self._full_mode_flags = self.windowFlags()
 
         self.on_text_command  = None
         self._muted           = False
@@ -1338,16 +1340,12 @@ class MainWindow(QMainWindow):
             self._header_widget.layout().addWidget(self._pin_btn)
             self._pin_btn.show()
 
-            # Restore window
+            # Restore window — use the saved full-mode flags so the title bar comes back
             win_w = min(1100, screen.width() - 40)
             win_h = min(680,  screen.height() - 60)
-            x = (screen.width() - win_w) // 2
+            x     = (screen.width() - win_w) // 2
 
-            flags = (
-                Qt.WindowType.WindowStaysOnTopHint
-                | Qt.WindowType.Window
-            )
-            self.setWindowFlags(flags)
+            self.setWindowFlags(self._full_mode_flags)
             self.setMinimumSize(_MIN_W, _MIN_H)
             self.setMaximumSize(16777215, 16777215)
             self.setGeometry(x, 0, win_w, win_h)
