@@ -447,13 +447,29 @@ def _handle_play(params: dict, player) -> str:
 
 
 def _handle_search_all(params: dict, player) -> str:
-    """Search across multiple platforms — builds results page for YouTube, opens others."""
+    """
+    Search across multiple platforms.
+    If a single platform is specified, redirect to _handle_play for that platform only.
+    Only opens multiple platforms when no specific platform was given.
+    """
     query     = params.get("query", "").strip()
-    platforms = params.get("platforms", ["youtube", "tiktok", "instagram", "twitter", "reddit"])
+    platform  = params.get("platform", "").lower().strip()
+    platforms = params.get("platforms", [])
+
     if not query:
         return "Please provide a search query, boss."
+
+    # If a single specific platform was given, redirect to play (single platform)
+    if platform and platform not in ("all", ""):
+        print(f"[VideoSearch] search_all redirected to play — platform={platform!r}")
+        return _handle_play(params, player)
+
     if isinstance(platforms, str):
         platforms = [p.strip() for p in platforms.split(",")]
+
+    # No platform specified — search across defaults
+    if not platforms:
+        platforms = ["youtube", "tiktok", "instagram", "twitter", "reddit"]
 
     # Open YouTube with HTML results page first
     if "youtube" in platforms:
@@ -464,9 +480,9 @@ def _handle_search_all(params: dict, player) -> str:
         else:
             _open_url(_platform_search_url("youtube", query))
 
-    # Open remaining platforms in browser tabs
+    # Open remaining platforms (max 3 extra tabs to avoid flooding browser)
     others = [p for p in platforms if p != "youtube"]
-    for p in others[:3]:   # max 3 extra tabs
+    for p in others[:3]:
         _open_url(_platform_search_url(p, query))
         time.sleep(0.4)
 
@@ -600,6 +616,9 @@ def video_search(
         if action == "play":
             return _handle_play(params, player) or "Done."
         elif action == "search_all":
+            # If a single platform was specified, treat as play — not multi-platform search
+            if params.get("platform", "").strip().lower() not in ("", "all"):
+                return _handle_play(params, player) or "Done."
             return _handle_search_all(params, player) or "Done."
         elif action == "summarize":
             return _handle_summarize(params, player, speak) or "Done."
