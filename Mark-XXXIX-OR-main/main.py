@@ -1258,43 +1258,48 @@ class JarvisLive:
 
             _HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             _FEEDS = [
-                ("BBC",      "https://feeds.bbci.co.uk/news/world/rss.xml"),
+                ("BBC",        "https://feeds.bbci.co.uk/news/world/rss.xml"),
                 ("Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml"),
-                ("Guardian", "https://www.theguardian.com/world/rss"),
-                ("NPR",      "https://feeds.npr.org/1001/rss.xml"),
-                ("CNN",      "http://rss.cnn.com/rss/edition_world.rss"),
+                ("Guardian",   "https://www.theguardian.com/world/rss"),
+                ("NPR",        "https://feeds.npr.org/1001/rss.xml"),
+                ("CNN",        "http://rss.cnn.com/rss/edition_world.rss"),
             ]
 
             def _fetch_one(name_url):
                 name, url = name_url
                 try:
-                    resp  = _req.get(url, timeout=5, headers=_HDR)
+                    resp  = _req.get(url, timeout=4, headers=_HDR)
                     resp.raise_for_status()
                     root  = _ET.fromstring(resp.content)
                     items = root.findall("./channel/item/title") or root.findall(".//item/title")
                     for item in items:
                         t = (item.text or "").strip()
                         if len(t) > 20:
-                            print(f"[News] {name}: {t[:60]}")
                             return t
-                except Exception as e:
-                    print(f"[News] {name} failed: {e}")
+                except Exception:
+                    pass   # silently skip — network may be down
                 return None
 
             headlines = []
-            with _cf.ThreadPoolExecutor(max_workers=5) as ex:
-                futs = [ex.submit(_fetch_one, f) for f in _FEEDS]
-                for fut in _cf.as_completed(futs, timeout=8):
-                    try:
-                        result = fut.result()
-                        if result and result not in headlines:
-                            headlines.append(result)
-                    except Exception:
-                        pass
-                    if len(headlines) >= 3:
-                        break
+            try:
+                with _cf.ThreadPoolExecutor(max_workers=5) as ex:
+                    futs = [ex.submit(_fetch_one, f) for f in _FEEDS]
+                    for fut in _cf.as_completed(futs, timeout=6):
+                        try:
+                            result = fut.result()
+                            if result and result not in headlines:
+                                headlines.append(result)
+                        except Exception:
+                            pass
+                        if len(headlines) >= 3:
+                            break
+            except Exception:
+                pass
 
-            print(f"[News] Got {len(headlines)} headlines")
+            if headlines:
+                print(f"[News] Got {len(headlines)} headlines")
+            else:
+                print("[News] No headlines — network may be offline")
             return headlines[:3]
 
         # Fetch news in thread — doesn't block the async loop
@@ -1605,25 +1610,26 @@ class JarvisLive:
 
                         if use_scribe:
                             try:
-                                # Resample 44100 → 16000 Hz before sending to Scribe.
-                                # Scribe is trained on 16kHz audio — resampling improves
-                                # accuracy especially for accented speech.
+                                # Resample 44100 → 16000 Hz using pure numpy (no audioop needed).
+                                # Scribe is trained on 16kHz — resampling improves accuracy
+                                # especially for accented speech.
                                 try:
-                                    import audioop
-                                    wav_16k = audioop.ratecv(
-                                        np.frombuffer(wav_bytes[44:], dtype=np.int16).tobytes(),
-                                        2, 1, SAMPLE_RATE, 16000, None
-                                    )[0]
+                                    src = np.frombuffer(wav_bytes[44:], dtype=np.int16).astype(np.float32)
+                                    # Simple decimation: pick every Nth sample
+                                    ratio   = SAMPLE_RATE / 16000          # 44100/16000 ≈ 2.756
+                                    n_out   = int(len(src) / ratio)
+                                    indices = (np.arange(n_out) * ratio).astype(np.int32)
+                                    indices = np.clip(indices, 0, len(src) - 1)
+                                    resampled = src[indices].astype(np.int16)
                                     buf_16k = io.BytesIO()
                                     with wave.open(buf_16k, "wb") as wf:
                                         wf.setnchannels(1)
                                         wf.setsampwidth(2)
                                         wf.setframerate(16000)
-                                        wf.writeframes(wav_16k)
+                                        wf.writeframes(resampled.tobytes())
                                     buf_16k.seek(0)
                                     scribe_buf = buf_16k
                                 except Exception:
-                                    # audioop unavailable (Python 3.13+) — send as-is
                                     scribe_buf = io.BytesIO(wav_bytes)
 
                                 scribe_buf.name = "speech.wav"
@@ -1641,9 +1647,13 @@ class JarvisLive:
                                     print("[JARVIS] Scribe quota exhausted — switching to Google STT")
                                     self.ui.write_log("SYS: Scribe quota used — Google STT active.")
                                     use_scribe = False
+                                elif any(x in err_s for x in ("getaddrinfo", "name resolution", "network", "connection", "timeout", "unreachable")):
+                                    # Network error — silently fall through to Google STT this clip
+                                    print("[JARVIS] Scribe unreachable (network) — trying Google STT")
+                                    use_scribe = False
                                 else:
                                     print(f"[JARVIS] Scribe error: {str(e)[:80]}")
-                                continue
+                                    continue
 
                         if not use_scribe:
                             try:

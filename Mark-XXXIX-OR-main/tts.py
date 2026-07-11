@@ -110,6 +110,11 @@ class ElevenLabsTTS:
                         self._quota_exceeded = True
                         self._quota_retry_at = _t.time() + 300  # retry in 5 minutes
                         print("[TTS] ElevenLabs quota exhausted — switching to SAPI (retry in 5 min)")
+                    elif any(x in err for x in ("getaddrinfo", "name resolution", "network", "connection", "timeout", "unreachable", "errno 11001")):
+                        # Network offline — use SAPI silently, retry ElevenLabs in 30s
+                        self._quota_exceeded = True
+                        self._quota_retry_at = _t.time() + 30
+                        print("[TTS] ElevenLabs unreachable (network offline) — SAPI fallback")
                     else:
                         print(f"[TTS] ElevenLabs error: {str(e)[:120]}")
 
