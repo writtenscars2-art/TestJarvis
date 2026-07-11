@@ -534,18 +534,30 @@ class JarvisLive:
         _startup_injected = False   # inject startup context once on first user message
         _world_monitor_asked = True  # True = briefing has asked about World Monitor
 
-        # Keywords that trigger deep analysis mode
-        _DEEP_ON = {
-            "deep analysis", "analyze deeply", "think carefully", "think step by step",
-            "detailed reasoning", "analyze this thoroughly", "use deep thinking",
-            "enable deep analysis", "turn on deep analysis", "deep mode on",
-        }
-        # Keywords that cancel deep analysis
-        _DEEP_OFF = {
-            "cancel deep analysis", "stop deep analysis", "disable deep analysis",
-            "turn off deep analysis", "deep mode off", "normal mode", "fast mode",
-            "stop thinking deeply", "cancel deep mode",
-        }
+        # ── Deep analysis mode — flexible regex triggers ──────────────────────
+        # Matches natural speech: "activate deep mode", "turn on deep thinking",
+        # "use deep analysis", "enable deep", "deep mode please", etc.
+        import re as _re_deep
+        _DEEP_ON_RE = _re_deep.compile(
+            r"\b("
+            r"(activate|enable|turn on|switch to|use|start|engage|begin)\s+(deep|nemotron|thinking|detailed)\b"
+            r"|deep\s+(analysis|mode|thinking|reasoning)\s*(on|please|now|mode)?"
+            r"|think\s+(carefully|deeply|step by step|thoroughly)"
+            r"|analyze\s+(deeply|thoroughly|carefully)"
+            r"|detailed\s+reasoning"
+            r"|deep\s+mode\s+on"
+            r")",
+            _re_deep.IGNORECASE,
+        )
+        _DEEP_OFF_RE = _re_deep.compile(
+            r"\b("
+            r"(cancel|disable|turn off|switch off|deactivate|stop|exit|end)\s+(deep|nemotron|thinking)\b"
+            r"|deep\s+(mode\s+off|analysis\s+off|mode\s+disabled)"
+            r"|normal\s+mode|fast\s+mode|quick\s+mode"
+            r"|stop\s+(thinking\s+deeply|deep\s+thinking|deep\s+analysis)"
+            r")",
+            _re_deep.IGNORECASE,
+        )
 
         def _build_sys() -> str:
             """Build clean system prompt — called at startup and every _sys_refresh turns."""
@@ -803,14 +815,28 @@ class JarvisLive:
                 self.ui.write_log(f"You: {user_text}")
 
                 # ── Deep analysis mode toggle ──────────────────────────────
-                if any(kw in ut_lower for kw in _DEEP_OFF):
+                # Check OFF first so "turn off deep analysis" doesn't also
+                # trigger the ON pattern (which contains "deep analysis").
+                _is_deep_off = bool(_DEEP_OFF_RE.search(ut_lower))
+                _is_deep_on  = bool(_DEEP_ON_RE.search(ut_lower)) and not _is_deep_off
+
+                if _is_deep_off and _deep_persistent:
                     _deep_persistent = False
-                    self.speak("Deep analysis mode disabled, boss. Back to fast mode.")
+                    self.speak("Deep analysis mode off, boss. Back to fast mode.")
+                    continue
+                elif _is_deep_off and not _deep_persistent:
+                    self.speak("Deep analysis mode is already off, boss.")
                     continue
 
-                if any(kw in ut_lower for kw in _DEEP_ON):
+                if _is_deep_on and not _deep_persistent:
                     _deep_persistent = True
-                    self.speak("Deep analysis mode enabled, boss. I will think carefully.")
+                    self.speak("Deep analysis mode on, boss. I'll use Nemotron for thorough reasoning.")
+                    # If the command was ONLY the activation phrase (≤5 words), wait for the
+                    # actual question on the next turn. Otherwise proceed with the same command.
+                    if len(user_text.split()) <= 5:
+                        continue
+                elif _is_deep_on and _deep_persistent:
+                    self.speak("Deep analysis mode is already active, boss.")
                     if len(user_text.split()) <= 5:
                         continue
 
