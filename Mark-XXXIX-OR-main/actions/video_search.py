@@ -81,22 +81,63 @@ def _get_browser_exe() -> str:
 
 
 def _open_url(url: str) -> None:
-    """Open a URL in the user's default browser."""
-    exe = _get_browser_exe()
-    try:
-        if exe:
-            subprocess.Popen([exe, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            subprocess.Popen(["cmd", "/c", "start", "", url],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
-        time.sleep(0.6)
-    except Exception as e:
-        print(f"[VideoSearch] open_url failed: {e}")
+    """Open a URL in the user's default browser — robust multi-method."""
+    print(f"[VideoSearch] Opening in browser: {url[:100]}")
+    import os as _os
+
+    # For local file:// URLs — use os.startfile (Windows native, works from any thread)
+    if url.startswith("file://"):
+        try:
+            local_path = url.replace("file:///", "").replace("file://", "").replace("/", "\\")
+            _os.startfile(local_path)
+            print(f"[VideoSearch] Opened local file via os.startfile")
+            time.sleep(0.8)
+            return
+        except Exception as e:
+            print(f"[VideoSearch] os.startfile failed: {e} — trying webbrowser")
         try:
             import webbrowser
             webbrowser.open(url)
-        except Exception:
-            pass
+            print("[VideoSearch] Opened via webbrowser (file)")
+            time.sleep(0.8)
+            return
+        except Exception as e:
+            print(f"[VideoSearch] webbrowser failed: {e}")
+        return
+
+    # For http/https URLs — try browser exe, then webbrowser module
+    exe = _get_browser_exe()
+    opened = False
+
+    if exe:
+        try:
+            subprocess.Popen([exe, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            opened = True
+            print(f"[VideoSearch] Launched with: {exe}")
+        except Exception as e:
+            print(f"[VideoSearch] exe launch failed: {e}")
+
+    if not opened:
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            opened = True
+            print("[VideoSearch] Launched with webbrowser module")
+        except Exception as e:
+            print(f"[VideoSearch] webbrowser failed: {e}")
+
+    if not opened:
+        # Last resort — Windows shell
+        try:
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False
+            )
+            print("[VideoSearch] Launched with cmd start")
+        except Exception as e:
+            print(f"[VideoSearch] cmd start failed: {e}")
+
+    time.sleep(0.8)
 
 
 # ── YouTube scraping ──────────────────────────────────────────────────────────
@@ -372,16 +413,20 @@ def _handle_play(params: dict, player) -> str:
 
     if platform == "youtube":
         # Scrape multiple results → build HTML page → open in browser
+        print(f"[VideoSearch] Scraping YouTube for: {query!r}")
         videos = _yt_scrape_videos(query, max_results=8)
+        print(f"[VideoSearch] Scrape returned {len(videos)} video(s)")
 
         if videos:
-            print(f"[VideoSearch] Found {len(videos)} videos for '{query}'")
             # If only 1 result — open it directly; otherwise show the results page
             if len(videos) == 1:
+                print(f"[VideoSearch] Single result — opening directly: {videos[0]['watch_url']}")
                 _open_url(videos[0]["watch_url"])
                 return f"Playing '{videos[0]['title']}' on YouTube, boss."
 
+            print(f"[VideoSearch] Building HTML results page for {len(videos)} videos")
             page_url = _build_results_page(query, videos, platform="YouTube")
+            print(f"[VideoSearch] HTML page: {page_url}")
             _open_url(page_url)
             return (
                 f"Found {len(videos)} YouTube videos for '{query}', boss. "
@@ -389,7 +434,7 @@ def _handle_play(params: dict, player) -> str:
             )
 
         # Fallback: open YouTube search page directly
-        print(f"[VideoSearch] Scrape returned nothing — opening YouTube search")
+        print(f"[VideoSearch] Scrape returned nothing — opening YouTube search page")
         fallback = _platform_search_url("youtube", query)
         _open_url(fallback)
         return f"Opened YouTube search for '{query}' in your browser, boss."
