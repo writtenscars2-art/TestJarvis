@@ -1432,30 +1432,37 @@ class JarvisLive:
         SAMPLE_RATE     = 44100
         CHANNELS        = 1
         CHUNK_FRAMES    = 1024
-        # ── VAD thresholds ───────────────────────────────────────────────
-        # SPEECH_RMS raised so keyboard clicks / chair noise don't trigger recording.
-        # If your mic is far away and quiet, lower SPEECH_RMS toward 600.
-        SILENCE_RMS     = 350    # below this = silence
-        SPEECH_RMS      = 800    # above this = speech onset detected
-        MIN_SPEECH_SEC  = 0.6    # ignore clips shorter than 0.6s (was 0.3 — too short, caused hallucinations)
-        MAX_SPEECH_SEC  = 20.0
-        SILENCE_END_SEC = 1.0    # stop recording after 1s of silence
+        # ── VAD thresholds (tuned for headset mic at normal talking volume) ─
+        # SPEECH_RMS = onset trigger. Headset mics (Realtek) at 30–50cm read
+        # normal speech as 400–900 RMS. 450 catches a calm voice without
+        # triggering on keyboard clicks (~200 RMS) or chair noise (~150 RMS).
+        SILENCE_RMS     = 200    # below this = silence
+        SPEECH_RMS      = 450    # above this = speech onset (was 800 — too high, required shouting)
+        MIN_SPEECH_SEC  = 0.4    # ignore clips under 0.4s (was 0.6 — cut short words like "play")
+        MAX_SPEECH_SEC  = 22.0
+        SILENCE_END_SEC = 1.1    # stop after 1.1s of silence
 
-        # Minimum average RMS of the full recording — clips quieter than this
-        # are near-silent even if they passed the onset threshold, discard them.
-        MIN_AVG_RMS     = 300
+        # Minimum average RMS of the full recording.
+        # Headset mic headset baseline noise floor is ~80-120 RMS, real speech ~350+.
+        MIN_AVG_RMS     = 180    # was 300 — too high for quiet/calm speech
 
         def _chunk_rms(chunk: np.ndarray) -> float:
             """RMS of int16 chunk (range 0–32768)."""
             return float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
 
-        def _make_wav(frames: list) -> bytes:
-            """Concatenate int16 numpy chunks into a WAV file."""
-            audio = np.concatenate(frames, axis=0).flatten()
+        def _make_wav(frames: list, boost: float = 2.5) -> bytes:
+            """
+            Concatenate int16 numpy chunks into a WAV file.
+            Applies a gain boost so quiet/accented speech is louder for Scribe.
+            boost=2.5 amplifies without hard clipping for typical headset levels.
+            """
+            audio = np.concatenate(frames, axis=0).flatten().astype(np.float64)
+            # Amplify — clip to int16 range to avoid wrap-around distortion
+            audio = np.clip(audio * boost, -32768, 32767).astype(np.int16)
             buf = io.BytesIO()
             with wave.open(buf, "wb") as wf:
                 wf.setnchannels(1)
-                wf.setsampwidth(2)       # int16 = 2 bytes
+                wf.setsampwidth(2)
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(audio.tobytes())
             buf.seek(0)
@@ -1598,14 +1605,34 @@ class JarvisLive:
 
                         if use_scribe:
                             try:
-                                wav_buf      = io.BytesIO(wav_bytes)
-                                wav_buf.name = "speech.wav"
+                                # Resample 44100 → 16000 Hz before sending to Scribe.
+                                # Scribe is trained on 16kHz audio — resampling improves
+                                # accuracy especially for accented speech.
+                                try:
+                                    import audioop
+                                    wav_16k = audioop.ratecv(
+                                        np.frombuffer(wav_bytes[44:], dtype=np.int16).tobytes(),
+                                        2, 1, SAMPLE_RATE, 16000, None
+                                    )[0]
+                                    buf_16k = io.BytesIO()
+                                    with wave.open(buf_16k, "wb") as wf:
+                                        wf.setnchannels(1)
+                                        wf.setsampwidth(2)
+                                        wf.setframerate(16000)
+                                        wf.writeframes(wav_16k)
+                                    buf_16k.seek(0)
+                                    scribe_buf = buf_16k
+                                except Exception:
+                                    # audioop unavailable (Python 3.13+) — send as-is
+                                    scribe_buf = io.BytesIO(wav_bytes)
+
+                                scribe_buf.name = "speech.wav"
                                 result = el_client.speech_to_text.convert(
-                                    file=wav_buf,
+                                    file=scribe_buf,
                                     model_id="scribe_v2",
-                                    language_code="en",  # Lock to English — prevents misidentification of accented English as another language
-                                    tag_audio_events=False,   # no [music] [laughter] tags
-                                    diarize=False,            # single speaker
+                                    language_code="en",
+                                    tag_audio_events=False,
+                                    diarize=False,
                                 )
                                 text = (result.text or "").strip()
                             except Exception as e:
