@@ -1392,45 +1392,41 @@ class JarvisLive:
             el_key  = ""
             mic_idx = None
 
-        # Noise phrases to filter — these are NEVER valid commands
-        _NOISE_PHRASES = {
-            "", "uh", "um", "hmm", "hm", "ah", "mm", "mmm", "mhm",
-            "uh huh", "the", "a", "oh", "eh", "okay", "ok",
-            "thank you", "thanks", "you", "i", "yes", "no",
-            "yeah", "yep", "nope", "hey", "hi", "hello",
-        }
-        # ── Hallucination blocklist ──────────────────────────────────────
-        # Scribe commonly hallucinates these phrases from background audio.
-        # Any transcript that EXACTLY matches one of these is silently dropped.
-        _HALLUCINATION_EXACT = {
-            "thank you", "thank you.", "thanks", "thanks.",
-            "you", "you.", "i", "i.", "yes", "yes.", "no", "no.",
-            "okay", "okay.", "ok", "ok.", "right", "right.",
-            "sure", "sure.", "hmm", "hmm.", "hm", "hm.",
-            "bye", "bye.", "bye bye", "bye bye.",
-            "uh", "um", "ah", "oh", "eh",
-            "wait", "wait.", "stop", "stop.",
-            "what", "what.", "yeah", "yeah.",
-            "hey", "hey.", "hi", "hi.", "hello", "hello.",
-            "jarvis", "jarvis.", "j.a.r.v.i.s",
-            "please", "please.", "go", "go.",
-            "i see", "i see.", "i see that", "i see that.",
-            "of course", "of course.", "certainly", "certainly.",
-            "all right", "all right.", "alright", "alright.",
-            "i understand", "i understand.",
-            "one moment", "one moment.", "just a moment", "just a moment.",
-        }
-        # Single-word responses that ARE valid — never filter these
+        # ── VALID single-word commands — checked FIRST, bypass all filters ──
+        # These words are allowed through regardless of noise/hallucination rules.
         _VALID_SINGLE_WORDS = {
             "yes", "no", "ok", "okay", "sure", "yeah", "yep", "nope",
             "stop", "cancel", "open", "close", "play", "pause", "next",
             "back", "quit", "exit", "shutdown", "mute", "unmute",
             "screenshot", "thanks", "hello", "hi", "jarvis",
         }
+
+        # ── Noise phrases — background sounds with NO command meaning ────
+        # DO NOT put valid commands here — use _VALID_SINGLE_WORDS above.
+        _NOISE_PHRASES = {
+            "", "uh", "um", "hmm", "hm", "ah", "mm", "mmm", "mhm",
+            "uh huh", "the", "a", "oh", "eh",
+        }
+
+        # ── Hallucination blocklist ──────────────────────────────────────
+        # Scribe commonly generates these from silence / background audio.
+        # IMPORTANT: never put words from _VALID_SINGLE_WORDS here.
+        _HALLUCINATION_EXACT = {
+            "thank you", "thank you.",
+            "you", "you.", "i", "i.",
+            "right", "right.",
+            "bye bye", "bye bye.",
+            "i see", "i see.", "i see that", "i see that.",
+            "of course", "of course.", "certainly", "certainly.",
+            "all right", "all right.", "alright", "alright.",
+            "i understand", "i understand.",
+            "one moment", "one moment.", "just a moment", "just a moment.",
+        }
+
         _NOISE_PATTERNS = [
             r"^\s*[\W\d]+\s*$",
             r"^.{1,2}$",
-            r"^\[.*\]$",          # pure Scribe sound tags like [music] [applause]
+            r"^\[.*\]$",   # pure Scribe sound tags like [music] [applause]
         ]
 
         SAMPLE_RATE     = 44100
@@ -1656,18 +1652,20 @@ class JarvisLive:
                         text_lower = clean_text.lower().rstrip(".,!? ")
                         word_count = len(clean_text.split())
 
-                        # ── Hallucination blocklist ──────────────────────────
-                        # Drop known Scribe hallucinations before anything else
-                        if text_lower in _HALLUCINATION_EXACT or clean_text.lower() in _HALLUCINATION_EXACT:
-                            print(f"[JARVIS] Hallucination blocked: {clean_text!r}")
-                            continue
-
-                        # Allow known single-word commands through regardless
+                        # ── STEP 1: Valid single-word commands — pass through immediately ──
+                        # Check this FIRST before any noise or hallucination filter.
                         if word_count == 1 and text_lower in _VALID_SINGLE_WORDS:
                             print(f"[JARVIS] >>> Heard (single-word command): {clean_text}")
                             self.ui._text_queue.put(clean_text)
                             continue
 
+                        # ── STEP 2: Hallucination blocklist ──────────────────
+                        # Drop known Scribe hallucinations (never contains valid commands)
+                        if text_lower in _HALLUCINATION_EXACT or clean_text.lower() in _HALLUCINATION_EXACT:
+                            print(f"[JARVIS] Hallucination blocked: {clean_text!r}")
+                            continue
+
+                        # ── STEP 3: General noise filter ─────────────────────
                         is_noise = (
                             word_count < 2
                             or text_lower in _NOISE_PHRASES
