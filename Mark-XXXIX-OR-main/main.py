@@ -162,8 +162,16 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "video_search",
-        "description": "Search and play videos from any platform. RULES: (1) Use action=play when the user names a specific platform (e.g. 'on TikTok', 'on YouTube', 'on Instagram') — pass that platform in the 'platform' field. (2) Use action=search_all ONLY when no specific platform is mentioned and the user wants results from multiple platforms. (3) NEVER use search_all when a platform is specified. Examples: 'play X on TikTok' → action=play, platform=tiktok. 'search for X videos' → action=search_all. 'find X on YouTube' → action=play, platform=youtube.",
-        "parameters": {"type": "object", "properties": {"action": {"type": "string", "description": "play | search_all | summarize | trending | open_channel"}, "query": {"type": "string"}, "platform": {"type": "string", "description": "REQUIRED for play action when user specifies a platform: youtube | tiktok | instagram | twitter | reddit | facebook | twitch | vimeo | dailymotion | rumble"}, "platforms": {"type": "array", "items": {"type": "string"}}, "url": {"type": "string"}, "region": {"type": "string"}, "channel": {"type": "string"}, "save": {"type": "boolean"}}, "required": []}
+        "description": "Search and play videos. ALWAYS use action=play for any video request. Pass the platform in the 'platform' field if the user mentions one. If no platform is mentioned, default to youtube. Never use search_all — use play for everything.",
+        "parameters": {"type": "object", "properties": {
+            "action":   {"type": "string", "description": "play | summarize | trending | open_channel"},
+            "query":    {"type": "string", "description": "What to search for"},
+            "platform": {"type": "string", "description": "youtube (default) | tiktok | instagram | twitter | reddit | facebook | twitch | vimeo | dailymotion | rumble"},
+            "url":      {"type": "string", "description": "YouTube URL for summarize"},
+            "region":   {"type": "string", "description": "Region code for trending e.g. US, NG, GB"},
+            "channel":  {"type": "string", "description": "Channel/username for open_channel"},
+            "save":     {"type": "boolean"}
+        }, "required": ["action", "query"]}
     },
     {
         "name": "screen_process",

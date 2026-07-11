@@ -391,6 +391,47 @@ def _platform_search_url(platform: str, query: str) -> str:
     return urls.get(platform.lower(), urls["youtube"])
 
 
+def _detect_platform_from_query(query: str) -> tuple[str, str]:
+    """
+    If the query contains a platform name (e.g. 'play X on TikTok'),
+    extract the platform and clean the query.
+    Returns (clean_query, platform).
+    """
+    _kw = {
+        "tiktok":      "tiktok",
+        "tik tok":     "tiktok",
+        "instagram":   "instagram",
+        "insta":       "instagram",
+        "ig":          "instagram",
+        "twitter":     "twitter",
+        "x.com":       "twitter",
+        "reddit":      "reddit",
+        "facebook":    "facebook",
+        "fb":          "facebook",
+        "twitch":      "twitch",
+        "vimeo":       "vimeo",
+        "dailymotion": "dailymotion",
+        "rumble":      "rumble",
+        "youtube":     "youtube",
+        "yt":          "youtube",
+    }
+    q_lower = query.lower()
+    for kw, platform in _kw.items():
+        # Match "on <platform>" or "<platform>" at end of query
+        import re as _re
+        pat = _re.compile(
+            r'\b(?:on\s+)?' + _re.escape(kw) + r'\b', _re.IGNORECASE
+        )
+        if pat.search(q_lower):
+            clean = pat.sub("", query).strip(" ,.-")
+            # Remove trailing "on"
+            clean = _re.sub(r'\s+on\s*$', '', clean, flags=_re.IGNORECASE).strip()
+            return clean or query, platform
+    return query, "youtube"
+
+
+# ── Action handlers ───────────────────────────────────────────────────────────
+
 _PLATFORM_NAMES = {
     "tiktok": "TikTok", "instagram": "Instagram", "twitter": "Twitter/X",
     "x": "Twitter/X", "reddit": "Reddit", "facebook": "Facebook",
@@ -403,10 +444,16 @@ _PLATFORM_NAMES = {
 
 def _handle_play(params: dict, player) -> str:
     query    = params.get("query", "").strip()
-    platform = params.get("platform", "youtube").lower().strip()
+    platform = params.get("platform", "").lower().strip()
 
     if not query:
         return "Please tell me what you'd like to watch, boss."
+
+    # If platform not given or LLM sent garbage, detect from the query text
+    if not platform or platform in ("all", "search_all", "none", ""):
+        query, platform = _detect_platform_from_query(query)
+        print(f"[VideoSearch] Platform auto-detected: {platform!r}")
+    platform = platform.lower().strip()
 
     if player:
         player.write_log(f"[VideoSearch] {platform}: {query}")
@@ -418,7 +465,6 @@ def _handle_play(params: dict, player) -> str:
         print(f"[VideoSearch] Scrape returned {len(videos)} video(s)")
 
         if videos:
-            # If only 1 result — open it directly; otherwise show the results page
             if len(videos) == 1:
                 print(f"[VideoSearch] Single result — opening directly: {videos[0]['watch_url']}")
                 _open_url(videos[0]["watch_url"])
@@ -433,13 +479,12 @@ def _handle_play(params: dict, player) -> str:
                 f"Results are displayed in your browser — click any card to watch."
             )
 
-        # Fallback: open YouTube search page directly
         print(f"[VideoSearch] Scrape returned nothing — opening YouTube search page")
         fallback = _platform_search_url("youtube", query)
         _open_url(fallback)
         return f"Opened YouTube search for '{query}' in your browser, boss."
 
-    # Non-YouTube platforms — open their search page directly
+    # Non-YouTube platform — open its search page directly
     url  = _platform_search_url(platform, query)
     name = _PLATFORM_NAMES.get(platform, platform.capitalize())
     _open_url(url)
@@ -615,11 +660,9 @@ def video_search(
     try:
         if action == "play":
             return _handle_play(params, player) or "Done."
-        elif action == "search_all":
-            # If a single platform was specified, treat as play — not multi-platform search
-            if params.get("platform", "").strip().lower() not in ("", "all"):
-                return _handle_play(params, player) or "Done."
-            return _handle_search_all(params, player) or "Done."
+        elif action in ("search_all", "search"):
+            # Always redirect to play — platform detected from query or params
+            return _handle_play(params, player) or "Done."
         elif action == "summarize":
             return _handle_summarize(params, player, speak) or "Done."
         elif action == "trending":
