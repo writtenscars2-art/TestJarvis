@@ -34,7 +34,7 @@ from memory.memory_manager import (
 from tts import get_tts
 
 from actions.file_processor import file_processor
-from actions.flight_finder     import flight_finder
+from actions.transport_finder  import transport_finder, flight_finder
 from actions.open_app          import open_app
 from actions.weather_report    import weather_action
 from actions.send_message      import send_message
@@ -157,8 +157,15 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "reminder",
-        "description": "Sets a timed reminder using Windows Task Scheduler. User must specify a date, time, and message.",
-        "parameters": {"type": "object", "properties": {"date": {"type": "string"}, "time": {"type": "string"}, "message": {"type": "string"}}, "required": ["date", "time", "message"]}
+        "description": "Set, list, delete, or snooze reminders. Examples: 'remind me at 3pm to call John' → action=set. 'what reminders do I have' → action=list. 'delete my 3pm reminder' → action=delete. 'snooze reminder 10 minutes' → action=snooze.",
+        "parameters": {"type": "object", "properties": {
+            "action":  {"type": "string", "description": "set | list | delete | snooze (default: set)"},
+            "date":    {"type": "string", "description": "Date — 'today', 'tomorrow', '15 March', '2025-06-01'"},
+            "time":    {"type": "string", "description": "Time — '3pm', '15:30', '9:00 AM', 'noon'"},
+            "message": {"type": "string", "description": "Reminder message text"},
+            "name":    {"type": "string", "description": "Keyword to identify reminder for delete/snooze"},
+            "minutes": {"type": "integer", "description": "Minutes to snooze (default: 10)"}
+        }, "required": []}
     },
     {
         "name": "video_search",
@@ -224,9 +231,18 @@ TOOL_DECLARATIONS = [
         "parameters": {"type": "object", "properties": {"action": {"type": "string"}, "platform": {"type": "string"}, "game_name": {"type": "string"}, "app_id": {"type": "string"}, "hour": {"type": "integer"}, "minute": {"type": "integer"}, "shutdown_when_done": {"type": "boolean"}}, "required": []}
     },
     {
-        "name": "flight_finder",
-        "description": "Searches for flights on Google Flights and returns the best options.",
-        "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}, "date": {"type": "string"}, "return_date": {"type": "string"}, "passengers": {"type": "integer"}, "cabin": {"type": "string"}, "save": {"type": "boolean"}}, "required": ["origin", "destination", "date"]}
+        "name": "transport_finder",
+        "description": "Find and open transport options between two places in the user's browser. Handles flights, trains, buses, taxis, ride-sharing (Uber/Bolt), car rentals, and ferries. Use this for ANY travel/transport request. Set mode to the transport type or leave as 'any' to show all options via Rome2rio.",
+        "parameters": {"type": "object", "properties": {
+            "mode":        {"type": "string", "description": "flight | train | bus | taxi | ride | car_rental | ferry | any (default: any)"},
+            "origin":      {"type": "string", "description": "Departure city or address"},
+            "destination": {"type": "string", "description": "Arrival city or address"},
+            "date":        {"type": "string", "description": "Departure date — natural language or YYYY-MM-DD"},
+            "return_date": {"type": "string", "description": "Return date for round trips"},
+            "passengers":  {"type": "integer"},
+            "cabin":       {"type": "string", "description": "economy | premium | business | first (flights only)"},
+            "save":        {"type": "boolean"}
+        }, "required": ["origin", "destination"]}
     },
     {
         "name": "file_processor",
@@ -480,8 +496,13 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: game_updater(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
 
+            elif tool_name == "transport_finder":
+                r = await loop.run_in_executor(None, lambda: transport_finder(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Done."
+
             elif tool_name == "flight_finder":
-                r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
+                # Legacy alias — redirect to transport_finder
+                r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
             elif tool_name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
